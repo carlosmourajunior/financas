@@ -165,6 +165,43 @@ def limite_usado(cartao: Cartao, hoje: date) -> int:
     )
 
 
+def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3) -> dict:
+    aberta = fatura_aberta(cartao, hoje)
+    proximas = []
+    fecha = aberta.fecha
+    for _ in range(meses):
+        fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
+        f = fatura_que_fecha_em(cartao, fecha)
+        proximas.append({"fecha": f.fecha, "vence": f.vence, "total": f.total})
+
+    grupos: dict = {}
+    for l in Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, tipo=Lancamento.Tipo.PARCELADA).order_by("data"):
+        grupos.setdefault(l.grupo, []).append(l)
+    parcelas = []
+    for itens in grupos.values():
+        ultima = itens[-1]
+        if ultima.data < aberta.abre:
+            continue  # compra já quitada
+        pagas = sum(1 for l in itens if l.data < aberta.abre)
+        parcelas.append(
+            {
+                "descricao": itens[0].descricao,
+                "valor": ultima.valor,
+                "atual": pagas + 1,
+                "total": ultima.parcela_total,
+                "termina": ultima.data,
+            }
+        )
+
+    return {
+        "fatura": {"abre": aberta.abre, "fecha": aberta.fecha, "vence": aberta.vence, "total": aberta.total},
+        "limite": cartao.limite,
+        "disponivel": cartao.limite - limite_usado(cartao, hoje),
+        "proximas": proximas,
+        "parcelas": parcelas,
+    }
+
+
 def total_faturas_pagas(cartao: Cartao, hoje: date) -> int:
     """Soma das faturas já vencidas, que tratamos como pagas no vencimento."""
     fecha = fatura_aberta(cartao, hoje).fecha

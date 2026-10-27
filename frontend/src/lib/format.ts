@@ -18,3 +18,10 @@ export function pct(parte: number, total: number) {
   if (total <= 0) return '0%'
   return `${Math.min(100, Math.round((parte / total) * 100))}%`
 }
+
+/** Converte "4.500,00" ou "4500" em centavos. */
+export function paraCentavos(texto: string) {
+  const limpo = texto.replace(/[^\d,]/g, '').replace(',', '.')
+  const n = Number.parseFloat(limpo)
+  return Number.isFinite(n) ? Math.round(n * 100) : 0
+}

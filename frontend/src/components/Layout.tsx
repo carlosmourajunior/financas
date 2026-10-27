@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { usuario } from '../data/mock'
+import { useAuth } from '../lib/auth'
 import Icon, { type IconName } from './Icon'
 
 const itens: { to: string; label: string; icon: IconName }[] = [
@@ -13,7 +13,18 @@ const itens: { to: string; label: string; icon: IconName }[] = [
 // No celular a barra inferior tem espaço para quatro itens e o botão de lançar.
 const itensCelular = itens.filter((i) => i.to !== '/emprestimos')
 
+function iniciais(nome: string) {
+  return nome
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!.toUpperCase())
+    .join('')
+}
+
 export default function Layout() {
+  const { usuario, sair } = useAuth()
+  const nome = usuario?.nome ?? ''
   return (
     <div className="min-h-dvh lg:flex">
       <aside className="hidden w-60 shrink-0 flex-col gap-7 border-r border-linha bg-white px-4 py-7 lg:sticky lg:top-0 lg:flex lg:h-dvh">
@@ -35,9 +46,14 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto flex items-center gap-2.5 px-3">
-          <span className="flex size-9 items-center justify-center rounded-full bg-nevoa text-sm font-bold">{usuario.iniciais}</span>
-          <span className="text-[15px] font-semibold">{usuario.nomeCompleto}</span>
+        <div className="mt-auto flex flex-col gap-2 px-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-9 items-center justify-center rounded-full bg-nevoa text-sm font-bold">{iniciais(nome)}</span>
+            <span className="text-[15px] font-semibold">{nome}</span>
+          </div>
+          <button onClick={sair} className="min-h-11 cursor-pointer self-start text-[15px] font-semibold text-suave hover:text-tinta">
+            Sair
+          </button>
         </div>
       </aside>
 

@@ -81,14 +81,16 @@ async function renovar(): Promise<boolean> {
 export async function api<T>(caminho: string, opcoes: { method?: string; body?: unknown; auth?: boolean } = {}): Promise<T> {
   const { method = 'GET', body, auth = true } = opcoes
 
+  // Arquivos vão como FormData; o navegador monta o Content-Type com o boundary.
+  const arquivo = body instanceof FormData
   const chamar = () =>
     fetch(`${BASE}${caminho}`, {
       method,
       headers: {
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(body !== undefined && !arquivo ? { 'Content-Type': 'application/json' } : {}),
         ...(auth && tokensEmMemoria ? { Authorization: `Bearer ${tokensEmMemoria.access}` } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: arquivo ? body : body !== undefined ? JSON.stringify(body) : undefined,
     })
 
   let resposta = await chamar()

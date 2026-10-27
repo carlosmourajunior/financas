@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from financas import views as fin
+from importacao import views as imp
 from usuarios.views import CadastroView, EuView
 
 router = DefaultRouter()
@@ -24,5 +25,7 @@ urlpatterns = [
     path("api/auth/token/renovar/", TokenRefreshView.as_view()),
     path("api/auth/eu/", EuView.as_view()),
     path("api/resumo/", fin.ResumoView.as_view()),
+    path("api/importar/fatura/", imp.PreviaFaturaView.as_view()),
+    path("api/importar/fatura/confirmar/", imp.ConfirmarFaturaView.as_view()),
     path("api/", include(router.urls)),
 ]

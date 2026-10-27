@@ -97,3 +97,28 @@ export interface Emprestimo {
   saldo: number
   parcelas_pagas: number | null
 }
+
+export interface ItemImportado {
+  data: string
+  descricao: string
+  valor: number
+  natureza: Natureza
+  tipo: 'compra' | 'encargo' | 'credito' | 'saldo_anterior'
+  parcela_atual: number | null
+  parcela_total: number | null
+  categoria: number | null
+  repetido: boolean
+  importar: boolean
+}
+
+export interface PreviaFatura {
+  banco: string
+  final: string
+  final_confere: boolean
+  vencimento: string | null
+  total: number | null
+  total_lido: number
+  conferida: boolean | null
+  ciclo: { abre: string; fecha: string; vence: string }
+  itens: ItemImportado[]
+}

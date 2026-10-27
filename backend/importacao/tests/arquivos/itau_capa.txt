@@ -1,0 +1,11 @@
+Resumo da fatura em R$
+Total da fatura anterior 1.000,00
+P Pagamentos efetuados -800,00
+S Saldo financiado 200,00
+E Encargos (Financiamento + moratório) 26,43
+Postagem: 25/08/2026
+Vencimento: 01/09/2026 L Lançamentos atuais 517,00
+Emissão: 25/08/2026
+= Total desta fatura 743,43
+Titular FULANO DE TAL
+Cartão 4220.XXXX.XXXX.0001

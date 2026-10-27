@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 from .models import Cartao, Conta, Emprestimo, Frequencia, Lancamento, Natureza, Recorrencia
 
@@ -132,14 +132,19 @@ def _vencimento(cartao: Cartao, fechamento: date) -> date:
     return somar_meses(fechamento, meses, cartao.dia_vencimento)
 
 
+def no_cartao(qs) -> int:
+    """Compras menos créditos (estornos) lançados no cartão."""
+    r = qs.aggregate(
+        despesas=Sum("valor", filter=Q(natureza=Natureza.DESPESA)),
+        creditos=Sum("valor", filter=Q(natureza=Natureza.RECEITA)),
+    )
+    return (r["despesas"] or 0) - (r["creditos"] or 0)
+
+
 def fatura_que_fecha_em(cartao: Cartao, fechamento: date) -> Fatura:
     anterior = somar_meses(fechamento, -1, cartao.dia_fechamento)
     abre = anterior + timedelta(days=1)
-    total = (
-        Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, natureza=Natureza.DESPESA, data__gte=abre, data__lte=fechamento)
-        .aggregate(s=Sum("valor"))["s"]
-        or 0
-    )
+    total = no_cartao(Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, data__gte=abre, data__lte=fechamento))
     return Fatura(cartao, abre, fechamento, _vencimento(cartao, fechamento), total)
 
 
@@ -159,10 +164,7 @@ def faturas_vencendo(cartao: Cartao, inicio: date, fim: date) -> list[Fatura]:
 def limite_usado(cartao: Cartao, hoje: date) -> int:
     """Tudo que ainda vai ser cobrado: a fatura aberta e as parcelas futuras."""
     abre = fatura_aberta(cartao, hoje).abre
-    return (
-        Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, natureza=Natureza.DESPESA, data__gte=abre).aggregate(s=Sum("valor"))["s"]
-        or 0
-    )
+    return no_cartao(Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, data__gte=abre))
 
 
 def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3) -> dict:
@@ -208,7 +210,7 @@ def total_faturas_pagas(cartao: Cartao, hoje: date) -> int:
     for _ in range(3):
         fecha = somar_meses(fecha, -1, cartao.dia_fechamento)
         if _vencimento(cartao, fecha) < hoje:
-            return _soma(Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, natureza=Natureza.DESPESA, data__lte=fecha))
+            return no_cartao(Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, data__lte=fecha))
     return 0
 
 
@@ -290,7 +292,8 @@ def resumo(dono, hoje: date) -> dict:
         "a_vencer": a_vencer,
         "livre_para_gastar": saldo - a_vencer,
         "contas_do_mes": contas_mes,
-        "entrou": _soma(do_mes.filter(natureza=Natureza.RECEITA)),
+        # Estorno no cartão abate a fatura, não é dinheiro que entrou.
+        "entrou": _soma(do_mes.filter(natureza=Natureza.RECEITA, cartao__isnull=True)),
         "saiu": _soma(do_mes.filter(natureza=Natureza.DESPESA)),
         "categorias": [{"nome": c["categoria__nome"] or "Sem categoria", "valor": c["valor"]} for c in categorias],
         "faturas": faturas,

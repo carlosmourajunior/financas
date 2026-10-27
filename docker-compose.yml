@@ -1,0 +1,11 @@
+# Ambiente local. O backend Django e o PostgreSQL entram no próximo PR.
+services:
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules

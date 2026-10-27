@@ -1,6 +1,7 @@
 from datetime import date
 
 from rest_framework import viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -15,7 +16,7 @@ from .serializers import (
     PagamentoEmprestimoSerializer,
     RecorrenciaSerializer,
 )
-from .servicos import fim_do_mes, gerar_ocorrencias, resumo
+from .servicos import detalhe_cartao, fim_do_mes, gerar_ocorrencias, resumo
 
 
 def ler_mes(valor: str | None) -> date | None:
@@ -49,6 +50,11 @@ class ContaViewSet(DoUsuarioViewSet):
 class CartaoViewSet(DoUsuarioViewSet):
     model = Cartao
     serializer_class = CartaoSerializer
+
+    @action(detail=True)
+    def detalhe(self, request, pk=None):
+        """Fatura aberta, próximas faturas e parcelas em andamento."""
+        return Response(detalhe_cartao(self.get_object(), date.today()))
 
 
 class CategoriaViewSet(DoUsuarioViewSet):

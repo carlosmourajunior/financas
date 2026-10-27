@@ -1,52 +1,77 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { FormConta } from '../components/Formularios'
 import Icon from '../components/Icon'
 import ReguaDoMes from '../components/ReguaDoMes'
 import { Barra, LinhaLink, LinkAcao, Secao, botaoSecundario } from '../components/ui'
-import {
-  cartoes,
-  categorias,
-  contasDoMes,
-  creditos,
-  dividas,
-  hoje,
-  lancamentos,
-  resumoMes,
-  saldoEmConta,
-  usuario,
-} from '../data/mock'
+import type { Pagina } from '../lib/api'
+import { useAuth } from '../lib/auth'
+import { nomeCartao, useCadastros } from '../lib/cadastros'
+import { DIAS, MESES, diaMes, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda, moedaPartes, pct } from '../lib/format'
+import type { Lancamento, Resumo } from '../lib/tipos'
+import { useApi } from '../lib/useApi'
 
 const OCULTO = 'R$ ••••'
-const DIAS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
-const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
 
-function quando(dia: number) {
+function quando(dia: number, hoje: Date) {
   if (dia === hoje.getDate()) return 'hoje'
   if (dia === hoje.getDate() + 1) return 'amanhã'
   return `dia ${dia}`
 }
 
+function primeiroNome(nome: string) {
+  return nome.split(' ')[0] || nome
+}
+
 export default function Inicio() {
+  const { usuario, sair } = useAuth()
   const [oculto, setOculto] = useState(false)
   const m = (centavos: number) => (oculto ? OCULTO : moeda(centavos))
 
-  const aVencer = contasDoMes.filter((c) => !c.paga)
-  const livre = saldoEmConta - aVencer.reduce((s, c) => s + c.valor, 0)
-  const partes = moedaPartes(livre)
+  const resumo = useApi<Resumo>('/resumo/')
+  const cad = useCadastros()
+  const mesAtual = isoMes(new Date())
+  const ultimos = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${mesAtual}&limit=6`)
+
+  if (resumo.erro) return <p className="px-5 py-10 text-center text-suave">Não foi possível carregar o resumo. {resumo.erro}</p>
+  if (!resumo.dados || cad.carregando) return <p className="px-5 py-10 text-center text-suave">Carregando…</p>
+
+  const nome = primeiroNome(usuario?.nome ?? '')
+
+  if (cad.contas.length === 0) {
+    return (
+      <div className="mx-auto flex max-w-xl flex-col gap-6 px-5 pt-8 lg:pt-12">
+        <div className="flex flex-col gap-2">
+          <h1 className="font-display text-[30px] font-extrabold tracking-tight">Olá, {nome}</h1>
+          <p className="text-[17px] leading-snug text-suave">
+            Para saber quanto ainda pode gastar, comece pela conta onde o seu dinheiro fica. Depois é só lançar ou importar.
+          </p>
+        </div>
+        <FormConta botao="Criar minha primeira conta" aoSalvar={() => cad.recarregar()} />
+        <button onClick={sair} className="min-h-11 cursor-pointer self-start text-[15px] font-semibold text-suave lg:hidden">
+          Sair
+        </button>
+      </div>
+    )
+  }
+
+  const r = resumo.dados
+  const hoje = lerData(r.hoje)
+  const aVencer = r.contas_do_mes.filter((c) => !c.paga)
+  const partes = moedaPartes(r.livre_para_gastar)
   const ultimoDia = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
-  const maiorCategoria = Math.max(...categorias.map((c) => c.valor))
-  const totalDevo = dividas.reduce((s, d) => s + d.saldo, 0)
-  const parcelasDevo = dividas.reduce((s, d) => s + d.parcela, 0)
-  const totalDevem = creditos.reduce((s, c) => s + c.valor - c.devolvido, 0)
+  const maiorCategoria = Math.max(0, ...r.categorias.map((c) => c.valor))
+  const proximoMes = MESES[(hoje.getMonth() + 1) % 12]
+  const emp = r.emprestimos
 
   return (
     <div className="flex flex-col lg:gap-7 lg:px-8 lg:pt-7">
       <div className="hidden flex-wrap items-center justify-between gap-4 lg:flex">
         <div>
-          <h1 className="font-display text-[30px] font-extrabold tracking-tight">Olá, {usuario.nome}</h1>
+          <h1 className="font-display text-[30px] font-extrabold tracking-tight">Olá, {nome}</h1>
           <p className="text-base text-suave">
-            {DIAS[hoje.getDay()].replace(/^./, (c) => c.toUpperCase())}, {hoje.getDate()} de {MESES[hoje.getMonth()]} de {hoje.getFullYear()}
+            {maiuscula(DIAS[hoje.getDay()])}, {porExtenso(r.hoje)} de {hoje.getFullYear()}
           </p>
         </div>
         <div className="flex flex-wrap gap-2.5">
@@ -64,11 +89,11 @@ export default function Inicio() {
       <section className="grid gap-x-12 gap-y-6 bg-tinta px-5 pb-7 pt-4 text-white lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:rounded-[20px] lg:px-8 lg:py-7">
         <div className="flex flex-col gap-5">
           <div className="flex items-center justify-between lg:hidden">
-            <span className="text-base font-semibold">Olá, {usuario.nome}</span>
-            <div className="flex gap-0.5">
+            <span className="text-base font-semibold">Olá, {nome}</span>
+            <div className="flex items-center gap-0.5">
               <BotaoOlho oculto={oculto} onClick={() => setOculto(!oculto)} />
-              <button aria-label="Notificações" className="flex size-11 cursor-pointer items-center justify-center rounded-xl">
-                <Icon name="sino" />
+              <button onClick={sair} className="min-h-11 cursor-pointer rounded-xl px-3 text-[15px] font-semibold text-tinta-claro">
+                Sair
               </button>
             </div>
           </div>
@@ -93,23 +118,26 @@ export default function Inicio() {
               até {ultimoDia} de {MESES[hoje.getMonth()]}, já descontadas as contas que ainda vencem
             </p>
           </div>
-          <ReguaDoMes hoje={hoje} contas={contasDoMes} />
+          <ReguaDoMes hoje={hoje} contas={r.contas_do_mes} />
         </div>
 
         <div className="flex flex-col justify-end">
           <div className="hidden pb-1.5 text-base font-bold lg:block">Ainda vence este mês</div>
-          {aVencer.map((c) => (
-            <div key={c.nome} className="flex items-center gap-3 border-t border-white/20 py-3">
+          {aVencer.length === 0 && (
+            <p className="border-t border-white/20 py-3 text-[15px] text-tinta-claro">Nenhuma conta a vencer até o fim do mês.</p>
+          )}
+          {aVencer.map((c, i) => (
+            <div key={i} className="flex items-center gap-3 border-t border-white/20 py-3">
               <span className="size-2.5 shrink-0 rounded-full bg-ambar" />
               <span className="grow text-[15px]">
-                {c.nome}, {quando(c.dia)}
+                {c.nome}, {quando(c.dia, hoje)}
               </span>
               <span className="text-[15px] font-bold tabular-nums">{m(c.valor)}</span>
             </div>
           ))}
           <div className="hidden items-center gap-3 border-t border-white/20 py-3 lg:flex">
             <span className="grow text-[15px] text-tinta-claro">Em conta agora</span>
-            <span className="text-[15px] font-bold tabular-nums">{m(saldoEmConta)}</span>
+            <span className="text-[15px] font-bold tabular-nums">{m(r.saldo_em_conta)}</span>
           </div>
         </div>
       </section>
@@ -131,18 +159,19 @@ export default function Inicio() {
 
       <div className="grid gap-8 px-5 pt-5 lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:gap-10 lg:px-0 lg:pt-0">
         <div className="flex flex-col gap-8">
-          <Secao titulo={`${MESES[hoje.getMonth()].replace(/^./, (c) => c.toUpperCase())} até agora`}>
+          <Secao titulo={`${maiuscula(MESES[hoje.getMonth()])} até agora`}>
             <div className="grid grid-cols-2 gap-4">
-              <Numero rotulo="Entrou" valor={m(resumoMes.entrou)} classe="text-musgo" />
-              <Numero rotulo="Saiu" valor={m(resumoMes.saiu)} />
+              <Numero rotulo="Entrou" valor={m(r.entrou)} classe="text-musgo" />
+              <Numero rotulo="Saiu" valor={m(r.saiu)} />
             </div>
             <p className="pt-3 text-[15px] text-suave lg:hidden">
-              Em conta agora: <strong className="text-tinta">{m(saldoEmConta)}</strong>
+              Em conta agora: <strong className="text-tinta">{m(r.saldo_em_conta)}</strong>
             </p>
           </Secao>
 
           <Secao titulo="Para onde foi o dinheiro" acao={<LinkAcao to="/lancamentos">Detalhes</LinkAcao>}>
-            {categorias.map((c) => (
+            {r.categorias.length === 0 && <p className="py-2.5 text-[15px] text-suave">Nenhuma despesa lançada este mês.</p>}
+            {r.categorias.map((c) => (
               <div key={c.nome} className="flex flex-col gap-1.5 border-b border-linha py-2.5">
                 <div className="flex justify-between text-[15px]">
                   <span className="font-semibold">{c.nome}</span>
@@ -156,20 +185,26 @@ export default function Inicio() {
 
         <div className="flex flex-col gap-8">
           <Secao titulo="Faturas abertas">
-            {cartoes.map((c) => (
-              <LinhaLink
-                key={c.id}
-                to="/cartoes"
-                titulo={`${c.nome} final ${c.final}`}
-                sub={`fecha em ${c.fechaDia} de novembro`}
-                valor={m(c.fatura)}
-              />
-            ))}
+            {r.faturas.length === 0 && (
+              <LinhaLink to="/cartoes" titulo="Nenhum cartão cadastrado" sub="Cadastre para acompanhar as faturas" valor="" />
+            )}
+            {r.faturas.map((f) => {
+              const c = cad.cartoes.find((x) => x.id === f.cartao)
+              return (
+                <LinhaLink
+                  key={f.cartao}
+                  to="/cartoes"
+                  titulo={c ? nomeCartao(c) : f.nome}
+                  sub={`fecha em ${porExtenso(f.fecha)}`}
+                  valor={m(f.total)}
+                />
+              )
+            })}
           </Secao>
-          <Secao titulo="Novembro já tem compromisso">
+          <Secao titulo={`${maiuscula(proximoMes)} já tem compromisso`}>
             <p className="text-[15px] leading-relaxed text-suave">
-              Parcelas e contas fixas somam <strong className="text-tinta">{m(resumoMes.compromissoProximoMes)}</strong>, cerca de{' '}
-              {pct(resumoMes.compromissoProximoMes, resumoMes.entrou)} do que costuma entrar.
+              Parcelas e contas fixas somam <strong className="text-tinta">{m(r.compromisso_proximo_mes)}</strong>
+              {r.entrou > 0 ? `, cerca de ${pct(r.compromisso_proximo_mes, r.entrou)} do que entrou este mês.` : '.'}
             </p>
           </Secao>
         </div>
@@ -179,14 +214,14 @@ export default function Inicio() {
             <LinhaLink
               to="/emprestimos"
               titulo="Você deve"
-              sub={`${dividas.length} empréstimos, ${moeda(parcelasDevo)} por mês`}
-              valor={m(totalDevo)}
+              sub={emp.devo_quantidade ? `${emp.devo_quantidade} ${emp.devo_quantidade === 1 ? 'empréstimo' : 'empréstimos'}, ${m(emp.devo_por_mes)} por mês` : 'Nada em aberto'}
+              valor={m(emp.devo_total)}
             />
             <LinhaLink
               to="/emprestimos"
               titulo="Te devem"
-              sub={creditos.map((c) => c.pessoa).join(' e ')}
-              valor={m(totalDevem)}
+              sub={emp.devem_pessoas.length ? emp.devem_pessoas.join(', ') : 'Ninguém te deve'}
+              valor={m(emp.devem_total)}
               valorClasse="text-musgo"
             />
           </Secao>
@@ -207,17 +242,17 @@ export default function Inicio() {
                 </tr>
               </thead>
               <tbody>
-                {lancamentos.slice(0, 6).map((l) => (
+                {(ultimos.dados?.results ?? []).map((l) => (
                   <tr key={l.id}>
-                    <td className="border-b border-linha py-3 pr-3 text-suave">{l.data.slice(8, 10)}/{l.data.slice(5, 7)}</td>
+                    <td className="border-b border-linha py-3 pr-3 text-suave">{diaMes(l.data)}</td>
                     <td className="border-b border-linha p-3 font-bold">
                       {l.descricao}{' '}
                       <span className="font-normal text-suave">
-                        {l.parcela ? `parcela ${l.parcela.atual} de ${l.parcela.total}` : l.tipo === 'recorrente' ? 'todo mês' : ''}
+                        {l.parcela_total ? `parcela ${l.parcela_atual} de ${l.parcela_total}` : l.tipo === 'recorrente' ? 'todo mês' : ''}
                       </span>
                     </td>
-                    <td className="border-b border-linha p-3">{l.categoria}</td>
-                    <td className="border-b border-linha p-3">{l.meio}</td>
+                    <td className="border-b border-linha p-3">{cad.categoria(l)}</td>
+                    <td className="border-b border-linha p-3">{cad.meio(l)}</td>
                     <td className={`border-b border-linha py-3 pl-3 text-right font-bold tabular-nums ${l.natureza === 'receita' ? 'text-musgo' : ''}`}>
                       {l.natureza === 'receita' ? `+ ${m(l.valor)}` : m(l.valor)}
                     </td>

@@ -159,3 +159,21 @@ class SaldoComFaturaTests(ApiBase):
         Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Nova", valor=7_000, natureza="despesa", data=date(2026, 10, 20))
         r = resumo(self.usuario, date(2026, 10, 27))
         self.assertEqual(r["saldo_em_conta"], 100_000 - 5_000)
+
+
+class DetalheCartaoTests(ApiBase):
+    def test_detalhe_mostra_fatura_proximas_e_parcelas(self):
+        self.lancar(descricao="Notebook", valor=100_000, tipo="parcelada", parcelas=4, cartao=self.cartao.id)
+        r = self.client.get(f"/api/cartoes/{self.cartao.id}/detalhe/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["fatura"]["total"], 25_000)
+        self.assertEqual(len(r.data["proximas"]), 3)
+        self.assertEqual([p["total"] for p in r.data["proximas"]], [25_000, 25_000, 25_000])
+        self.assertEqual(r.data["parcelas"][0]["atual"], 1)
+        self.assertEqual(r.data["parcelas"][0]["total"], 4)
+        self.assertEqual(r.data["disponivel"], 600_000 - 100_000)
+
+    def test_detalhe_de_cartao_alheio_e_404(self):
+        outro = criar_usuario("b@exemplo.com")
+        self.client.force_authenticate(outro)
+        self.assertEqual(self.client.get(f"/api/cartoes/{self.cartao.id}/detalhe/").status_code, 404)

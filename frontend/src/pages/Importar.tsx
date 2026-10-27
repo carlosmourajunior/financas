@@ -29,6 +29,9 @@ export default function Importar() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 px-5 pt-5 lg:px-8 lg:pt-7">
       <Titulo>Importar</Titulo>
+      <p className="rounded-xl bg-nevoa px-4 py-3 text-[15px] text-suave">
+        A leitura de faturas e extratos chega na próxima etapa. Por enquanto esta tela mostra um exemplo e não grava nada.
+      </p>
       <Abas
         rotulo="O que importar"
         opcoes={[

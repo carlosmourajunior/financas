@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --color-tinta: #12343b;
+  --color-musgo: #2f6b4f;
+  --color-ambar: #c9822b;
+  --color-ambar-texto: #8a5413;
+  --color-fundo: #fbfcfc;
+  --color-linha: #e4eae8;
+  --color-borda: #cbd6d3;
+  --color-suave: #4f6470;
+  --color-nevoa: #eef3f2;
+  --color-tinta-claro: #d3e0dd;
+  --color-marca-paga: #9fb8b3;
+
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-sans: "Source Sans 3", system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-fundo font-sans text-tinta antialiased;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-tinta;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

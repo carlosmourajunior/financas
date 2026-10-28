@@ -92,25 +92,51 @@ class ServicosTests(TestCase):
         self.assertEqual(next(i for i in p["itens"] if i["descricao"].startswith("IOF"))["categoria"], taxas.id)
 
     def test_confirmar_cria_parcelas_futuras_e_a_fatura_fica_igual_a_do_banco(self):
+        fecha = date(2026, 8, 24)
         p = previa(self.cartao, itau_exemplo())
-        confirmar(self.cartao, [i for i in p["itens"] if i["importar"]])
-        self.assertEqual(fatura_que_fecha_em(self.cartao, date(2026, 8, 24)).total, 74_343)
+        confirmar(self.cartao, fecha, [i for i in p["itens"] if i["importar"]])
+        self.assertEqual(fatura_que_fecha_em(self.cartao, fecha).total, 74_343)
         azul = Lancamento.objects.filter(descricao="LOJA AZUL").order_by("parcela_atual")
         self.assertEqual([l.parcela_atual for l in azul], [10, 11, 12])
         self.assertEqual(azul[2].data, date(2026, 10, 2))
 
-        # Importar de novo: tudo aparece como repetido.
-        de_novo = previa(self.cartao, itau_exemplo())
-        self.assertTrue(all(i["repetido"] and not i["importar"] for i in de_novo["itens"]))
+    def test_importar_de_novo_substitui_e_mantem_o_que_foi_lancado_a_mao(self):
+        fecha = date(2026, 8, 24)
+        manual = Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Feira", valor=3_000, natureza="despesa", data=date(2026, 8, 5))
+        p = previa(self.cartao, itau_exemplo())
+        self.assertEqual(p["ja_importados"], 0)
+        confirmar(self.cartao, fecha, [i for i in p["itens"] if i["importar"]])
+        total = Lancamento.objects.count()
 
-    def test_parcela_seguinte_ja_criada_e_reconhecida_no_mes_seguinte(self):
+        de_novo = previa(self.cartao, itau_exemplo())
+        self.assertGreater(de_novo["ja_importados"], 0)
+        self.assertTrue(all(i["importar"] for i in de_novo["itens"]))
+        r = confirmar(self.cartao, fecha, de_novo["itens"])
+        self.assertGreater(r["substituidos"], 0)
+        # Nada duplicado, nem as parcelas futuras; o lançamento feito à mão continua.
+        self.assertEqual(Lancamento.objects.count(), total)
+        self.assertEqual(fatura_que_fecha_em(self.cartao, fecha).total, 74_343 + manual.valor)
+        self.assertTrue(Lancamento.objects.filter(pk=manual.pk).exists())
+
+    def test_linha_igual_a_lancamento_feito_a_mao_vem_desmarcada(self):
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="POSTO CENTRAL", valor=2_000, natureza="despesa", data=date(2026, 8, 21))
+        p = previa(self.cartao, itau_exemplo())
+        posto = next(i for i in p["itens"] if i["descricao"] == "POSTO CENTRAL")
+        self.assertTrue(posto["repetido"])
+        self.assertFalse(posto["importar"])
+
+    def test_fatura_seguinte_troca_a_parcela_prevista_sem_duplicar(self):
         f = ler_fatura(ler("Nubank_2026-08-22.csv"), "Nubank_2026-08-22.csv")
         nubank = Cartao.objects.create(dono=self.usuario, nome="Nubank", limite=500_000, dia_fechamento=15, dia_vencimento=22)
-        confirmar(nubank, [i for i in previa(nubank, f)["itens"] if i["importar"]])
+        p = previa(nubank, f)
+        confirmar(nubank, p["ciclo"]["fecha"], [i for i in p["itens"] if i["importar"]])
         loja = Lancamento.objects.get(descricao="Loja Exemplo - NuPay", parcela_atual=2)
         f.itens = [i for i in f.itens if i.descricao == "Loja Exemplo - NuPay"]
         f.itens[0].parcela_atual, f.itens[0].data, f.vencimento = 2, loja.data, date(2026, 9, 22)
-        self.assertTrue(previa(nubank, f)["itens"][0]["repetido"])
+        p = previa(nubank, f)
+        confirmar(nubank, p["ciclo"]["fecha"], p["itens"])
+        parcelas = Lancamento.objects.filter(descricao="Loja Exemplo - NuPay").order_by("parcela_atual")
+        self.assertEqual([l.parcela_atual for l in parcelas], [1, 2, 3])
 
 
 class ApiTests(APITestCase):
@@ -131,9 +157,15 @@ class ApiTests(APITestCase):
         self.assertTrue(r.data["final_confere"])
         self.assertNotIn(0, [i["valor"] for i in r.data["itens"]])
         itens = [{**i, "data": str(i["data"])} for i in r.data["itens"] if i["importar"]]
-        c = self.client.post("/api/importar/fatura/confirmar/", {"cartao": self.cartao.id, "itens": itens}, format="json")
+        corpo = {"cartao": self.cartao.id, "fecha": str(r.data["ciclo"]["fecha"]), "itens": itens}
+        c = self.client.post("/api/importar/fatura/confirmar/", corpo, format="json")
         self.assertEqual(c.status_code, 201, c.data)
         self.assertEqual(Lancamento.objects.filter(dono=self.usuario, descricao="LOJA DE CASA").count(), 9)  # parcelas 2 a 10
+        # Importar de novo substitui em vez de duplicar.
+        self.client.post("/api/importar/fatura/confirmar/", corpo, format="json")
+        self.assertEqual(Lancamento.objects.filter(dono=self.usuario, descricao="LOJA DE CASA").count(), 9)
+        errado = self.client.post("/api/importar/fatura/confirmar/", {**corpo, "fecha": "2026-02-13"}, format="json")
+        self.assertEqual(errado.status_code, 400)
 
     def test_cartao_de_outro_usuario(self):
         outro = Usuario.objects.create_user(email="b@exemplo.com", password="senha-forte-123", nome="B")

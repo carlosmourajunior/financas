@@ -62,7 +62,7 @@ export default function Importar() {
     setErro(null)
     setGravando(true)
     try {
-      await api('/importar/fatura/confirmar/', { method: 'POST', body: { cartao: Number(cartaoEscolhido), itens: marcados } })
+      await api('/importar/fatura/confirmar/', { method: 'POST', body: { cartao: Number(cartaoEscolhido), fecha: previa!.ciclo.fecha, itens: marcados } })
       navigate('/cartoes')
     } catch (err) {
       setErro((err as Error).message || 'Não foi possível importar.')
@@ -163,7 +163,7 @@ export default function Importar() {
                     )}
                     {l.natureza === 'receita' && ', crédito na fatura'}
                   </span>
-                  {l.repetido && <span className="text-sm font-semibold text-ambar-texto">Parece repetido: já existe igual neste cartão</span>}
+                  {l.repetido && <span className="text-sm font-semibold text-ambar-texto">Parece repetido: você já lançou igual à mão neste cartão</span>}
                   {l.parcela_total && (
                     <span className="text-sm font-semibold text-musgo">
                       Parcela {l.parcela_atual} de {l.parcela_total}
@@ -211,7 +211,7 @@ function Conferencia({ p }: { p: PreviaFatura }) {
     <div className="flex flex-col gap-2 pb-2 text-[15px] leading-relaxed">
       <p className="text-suave">
         Lemos a fatura do {p.banco}
-        {vence} e encontramos {p.itens.length} lançamentos. Os que parecem repetidos ficaram desmarcados.
+        {vence} e encontramos {p.itens.length} lançamentos. Os iguais a lançamentos que você fez à mão ficaram desmarcados.
       </p>
       {p.conferida === true && (
         <p className="font-semibold text-musgo">Os lançamentos somam {moeda(p.total!)}, o mesmo total da fatura do banco.</p>
@@ -232,6 +232,11 @@ function Conferencia({ p }: { p: PreviaFatura }) {
       <p className="text-suave">
         Entra na fatura que fecha em {porExtenso(p.ciclo.fecha)} e vence em {porExtenso(p.ciclo.vence)}.
       </p>
+      {p.ja_importados > 0 && (
+        <p className="font-semibold text-ambar-texto">
+          Esta fatura já foi importada. Ao importar de novo, as {p.ja_importados} linhas da importação anterior são substituídas por estas.
+        </p>
+      )}
     </div>
   )
 }

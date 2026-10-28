@@ -88,9 +88,13 @@ def previa(cartao: Cartao, lida: FaturaLida) -> dict:
     ):
         historico[normalizar(desc)] = cat
 
-    # Lançamentos que já existem no cartão perto deste ciclo, para marcar repetidos.
+    # O que veio de importação anterior neste ciclo será substituído ao confirmar.
+    ja_importados = Lancamento.objects.filter(cartao=cartao, importado=True, data__gte=ciclo.abre, data__lte=ciclo.fecha).count()
+    # Lançados à mão no cartão perto deste ciclo: ficam, e as linhas iguais vêm desmarcadas.
     existentes = list(
-        Lancamento.objects.filter(dono=dono, cartao=cartao, data__gte=ciclo.abre - timedelta(days=7), data__lte=ciclo.fecha + timedelta(days=7))
+        Lancamento.objects.filter(
+            dono=dono, cartao=cartao, importado=False, data__gte=ciclo.abre - timedelta(days=7), data__lte=ciclo.fecha + timedelta(days=7)
+        )
     )
 
     def repetido(data: date, valor: int, descricao: str, atual, total) -> bool:
@@ -156,16 +160,36 @@ def previa(cartao: Cartao, lida: FaturaLida) -> dict:
         "total_lido": lida.total_calculado,
         "conferida": lida.conferida,
         "ciclo": {"abre": ciclo.abre, "fecha": ciclo.fecha, "vence": ciclo.vence},
+        "ja_importados": ja_importados,
         "itens": itens,
     }
 
 
+def _previsoes(cartao: Cartao, depois_de: date, descricao: str, valor: int, atual: int, total: int):
+    """Parcelas futuras criadas por importações anteriores para a mesma compra."""
+    chave = normalizar(descricao)
+    candidatas = Lancamento.objects.filter(
+        cartao=cartao, importado=True, data__gt=depois_de, valor=valor, parcela_total=total, parcela_atual__gt=atual
+    )
+    return [l.pk for l in candidatas if normalizar(l.descricao) == chave]
+
+
 @transaction.atomic
-def confirmar(cartao: Cartao, itens: list[dict]) -> int:
-    """Grava as linhas escolhidas. Uma parcela k de n cria também as parcelas seguintes."""
+def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
+    """Grava as linhas escolhidas no ciclo que fecha em `fecha`.
+
+    O que foi importado antes para este ciclo é apagado e substituído; lançamentos feitos à mão ficam.
+    Uma parcela k de n cria também as parcelas seguintes, trocando as que uma importação anterior já previu.
+    """
+    ciclo = fatura_que_fecha_em(cartao, fecha)
+    substituidos, _ = Lancamento.objects.filter(
+        cartao=cartao, importado=True, data__gte=ciclo.abre, data__lte=ciclo.fecha
+    ).delete()
+
     hoje = date.today()
     criados = 0
     for i in itens:
+        data_item = _dentro(i["data"], ciclo)
         base = {
             "dono": cartao.dono,
             "cartao": cartao,
@@ -173,12 +197,14 @@ def confirmar(cartao: Cartao, itens: list[dict]) -> int:
             "natureza": i["natureza"],
             # Da prévia vem o id; da API, a categoria já validada.
             "categoria_id": getattr(i.get("categoria"), "id", i.get("categoria")),
+            "importado": True,
         }
         atual, total = i.get("parcela_atual"), i.get("parcela_total")
         if atual and total and total >= atual:
+            Lancamento.objects.filter(pk__in=_previsoes(cartao, ciclo.fecha, i["descricao"], i["valor"], atual, total)).delete()
             grupo = Lancamento.novo_grupo()
             for k in range(atual, total + 1):
-                data = somar_meses(i["data"], k - atual)
+                data = somar_meses(data_item, k - atual)
                 Lancamento.objects.create(
                     **base,
                     valor=i["valor"],
@@ -191,6 +217,6 @@ def confirmar(cartao: Cartao, itens: list[dict]) -> int:
                 )
                 criados += 1
         else:
-            Lancamento.objects.create(**base, valor=i["valor"], data=i["data"], tipo=Lancamento.Tipo.UNICA, pago=i["data"] <= hoje)
+            Lancamento.objects.create(**base, valor=i["valor"], data=data_item, tipo=Lancamento.Tipo.UNICA, pago=data_item <= hoje)
             criados += 1
-    return criados
+    return {"criados": criados, "substituidos": substituidos}

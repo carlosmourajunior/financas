@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from financas.models import Cartao, Categoria, Natureza
+from financas.servicos import somar_meses
 
 from .leitores import FormatoDesconhecido, ler_fatura
 from .servicos import confirmar, previa
@@ -59,6 +60,7 @@ class ItemSerializer(serializers.Serializer):
 
 class ConfirmarSerializer(serializers.Serializer):
     cartao = serializers.IntegerField()
+    fecha = serializers.DateField(help_text="Fechamento da fatura, como veio na prévia (ciclo.fecha).")
     itens = ItemSerializer(many=True, allow_empty=False)
 
 
@@ -67,5 +69,8 @@ class ConfirmarFaturaView(APIView):
         s = ConfirmarSerializer(data=request.data, context={"request": request})
         s.is_valid(raise_exception=True)
         cartao = cartao_do_usuario(request, s.validated_data["cartao"])
-        criados = confirmar(cartao, s.validated_data["itens"])
-        return Response({"criados": criados}, status=status.HTTP_201_CREATED)
+        fecha = s.validated_data["fecha"]
+        if fecha != somar_meses(fecha, 0, cartao.dia_fechamento):
+            raise ValidationError({"fecha": "Não é um dia de fechamento deste cartão."})
+        resultado = confirmar(cartao, s.validated_data["fecha"], s.validated_data["itens"])
+        return Response(resultado, status=status.HTTP_201_CREATED)

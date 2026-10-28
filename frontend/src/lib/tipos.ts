@@ -120,5 +120,6 @@ export interface PreviaFatura {
   total_lido: number
   conferida: boolean | null
   ciclo: { abre: string; fecha: string; vence: string }
+  ja_importados: number
   itens: ItemImportado[]
 }

@@ -41,7 +41,7 @@ Todas as rotas, menos cadastro e login, exigem `Authorization: Bearer <token>`. 
 | `/api/emprestimos/`, `/api/pagamentos-emprestimo/` | Empréstimos (`direcao=devo` ou `devem`) e pagamentos ou devoluções |
 | `GET /api/cartoes/{id}/detalhe/` | Fatura aberta, limite, parcelas em andamento e próximas faturas |
 | `POST /api/importar/fatura/` | Lê a fatura (`arquivo` e `cartao`, multipart) e devolve as linhas para revisar, sem gravar. Aceita CSV do Nubank, PDF do Itaú e CSV do Sicredi |
-| `POST /api/importar/fatura/confirmar/` | Grava as linhas escolhidas (`cartao`, `itens`). Uma parcela k de n cria também as seguintes |
+| `POST /api/importar/fatura/confirmar/` | Grava as linhas escolhidas (`cartao`, `fecha` do ciclo, `itens`). Importar de novo o mesmo período substitui o que foi importado antes; o que foi lançado à mão fica. Uma parcela k de n cria também as seguintes |
 
 Testes do backend: `docker compose exec backend python manage.py test`.
 

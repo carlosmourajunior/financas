@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import BotaoPagar from '../components/BotaoPagar'
 import { FormCartao } from '../components/Formularios'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Abas, Barra, Secao, Segmentos, Titulo, botaoSecundario } from '../components/ui'
 import type { Pagina } from '../lib/api'
-import { MESES, lerData, maiuscula, porExtenso } from '../lib/datas'
+import { MESES, isoData, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda, pct } from '../lib/format'
+import { desfazerPagamentoFatura, pagarFatura } from '../lib/pagar'
 import type { Cartao, DetalheCartao } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
@@ -110,6 +112,24 @@ export default function Cartoes() {
               {d.fatura.aberta ? 'Fecha' : 'Fechou'} em {porExtenso(d.fatura.fecha)} e vence em{' '}
               <strong className="text-tinta">{porExtenso(d.fatura.vence)}</strong>
             </p>
+            {d.fatura.pagamento ? (
+              <div className="flex flex-wrap items-center gap-x-3">
+                <span className="text-[15px] font-semibold text-musgo">
+                  Paga em {porExtenso(d.fatura.pagamento.data)}, {moeda(d.fatura.pagamento.valor)}
+                </span>
+                <BotaoPagar discreto rotulo="Desfazer" acao={() => desfazerPagamentoFatura(d.fatura.pagamento!.id)} aoMudar={detalhe.recarregar} />
+              </div>
+            ) : (
+              !d.fatura.aberta &&
+              d.fatura.total > 0 && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-[15px] font-semibold text-ambar-texto">
+                    {d.fatura.vence < isoData(new Date()) ? 'Venceu e não foi paga' : 'Ainda não foi paga'}
+                  </span>
+                  <BotaoPagar rotulo="Marcar como paga" acao={() => pagarFatura(c.id, d.fatura.fecha)} aoMudar={detalhe.recarregar} />
+                </div>
+              )
+            )}
             <div className="flex flex-col gap-1.5 pt-1">
               <Barra largura={pct(d.limite - d.disponivel, d.limite)} />
               <p className="text-[15px]">

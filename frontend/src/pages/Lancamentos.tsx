@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import BotaoPagar from '../components/BotaoPagar'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Titulo } from '../components/ui'
@@ -7,6 +8,7 @@ import type { Pagina } from '../lib/api'
 import { useCadastros } from '../lib/cadastros'
 import { MESES, isoData, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda } from '../lib/format'
+import { desfazerPagamentoFatura, marcarLancamento, pagarFatura } from '../lib/pagar'
 import type { FaturaDoMes, Lancamento } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
@@ -33,15 +35,57 @@ interface Linha {
   tipo: Lancamento['tipo'] | 'fatura'
   parcela?: string
   para?: string
+  lancamento?: number
+  fatura?: FaturaDoMes
 }
 
 function situacao(l: Linha, hoje: string) {
+  if (l.fatura?.pagamento) return `Paga em ${porExtenso(l.fatura.pagamento.data)}`
   if (l.natureza === 'receita') return l.pago ? 'Recebido' : `A receber em ${porExtenso(l.data)}`
-  if (l.pago) return l.tipo === 'fatura' ? 'Paga no vencimento' : 'Pago'
+  if (l.pago) return 'Pago'
   if (l.data === hoje) return 'Vence hoje'
   if (l.data < hoje) return 'Venceu e não foi pago'
   const dias = Math.round((lerData(l.data).getTime() - lerData(hoje).getTime()) / 86_400_000)
   return dias === 1 ? 'Vence amanhã' : `Vence em ${dias} dias`
+}
+
+/** O botão de pagar ou desfazer da linha, ou nada. */
+function acaoDa(l: Linha, hoje: string, aoMudar: () => void) {
+  const f = l.fatura
+  if (f) {
+    if (f.pagamento) return <BotaoPagar discreto rotulo="Desfazer pagamento" acao={() => desfazerPagamentoFatura(f.pagamento!.id)} aoMudar={aoMudar} />
+    // Fatura que ainda não fechou pode receber compras: o pagamento fica para depois do fechamento.
+    if (f.fecha >= hoje || f.total <= 0) return null
+    return <BotaoPagar rotulo="Marcar como paga" acao={() => pagarFatura(f.cartao, f.fecha)} aoMudar={aoMudar} />
+  }
+  if (!l.lancamento) return null
+  const id = l.lancamento
+  if (l.pago) return <BotaoPagar discreto rotulo="Desfazer" acao={() => marcarLancamento(id, false)} aoMudar={aoMudar} />
+  return (
+    <BotaoPagar
+      rotulo={l.natureza === 'receita' ? 'Marcar como recebido' : 'Marcar como pago'}
+      acao={() => marcarLancamento(id, true)}
+      aoMudar={aoMudar}
+    />
+  )
+}
+
+function NovoBotoes() {
+  return (
+    <>
+      <Link to="/lancamentos/novo" className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-tinta px-3.5 text-[15px] font-bold text-white">
+        <Icon name="mais" size={18} strokeWidth={2} />
+        Novo pagamento
+      </Link>
+      <Link
+        to="/lancamentos/novo?natureza=receita"
+        className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-musgo px-3.5 text-[15px] font-bold text-white"
+      >
+        <Icon name="mais" size={18} strokeWidth={2} />
+        Novo recebimento
+      </Link>
+    </>
+  )
 }
 
 function combina(l: Linha, f: Filtro) {
@@ -73,6 +117,7 @@ export default function Lancamentos() {
       natureza: l.natureza,
       pago: l.pago,
       tipo: l.tipo,
+      lancamento: l.id,
       parcela: l.parcela_total ? `parcela ${l.parcela_atual} de ${l.parcela_total}` : l.tipo === 'recorrente' ? 'todo mês' : undefined,
     }))
     for (const f of faturas.dados ?? []) {
@@ -86,6 +131,7 @@ export default function Lancamentos() {
         pago: f.paga,
         tipo: 'fatura',
         para: `/cartoes?cartao=${f.cartao}&fecha=${f.fecha}`,
+        fatura: f,
       })
     }
     return out.sort((a, b) => a.data.localeCompare(b.data) || a.titulo.localeCompare(b.titulo))
@@ -97,22 +143,25 @@ export default function Lancamentos() {
   const falta = linhas.filter((l) => l.natureza === 'despesa' && !l.pago).reduce((s, l) => s + l.valor, 0)
   const carregando = (resposta.carregando && !resposta.dados) || (faturas.carregando && !faturas.dados)
   const erro = resposta.erro || faturas.erro
+  const recarregar = () => {
+    resposta.recarregar()
+    faturas.recarregar()
+  }
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-3.5 px-5 pt-5 lg:px-8 lg:pt-7">
       <Titulo
         acoes={
-          <Link
-            to="/lancamentos/novo"
-            className="hidden min-h-11 items-center gap-2 rounded-xl bg-tinta px-4 text-[15px] font-bold text-white lg:flex"
-          >
-            <Icon name="mais" size={18} strokeWidth={2} />
-            Novo lançamento
-          </Link>
+          <div className="hidden gap-2 lg:flex">
+            <NovoBotoes />
+          </div>
         }
       >
         Lançamentos
       </Titulo>
+      <div className="grid grid-cols-2 gap-2 lg:hidden">
+        <NovoBotoes />
+      </div>
 
       <div className="-ml-3 flex items-center gap-1">
         <button aria-label="Mês anterior" onClick={() => mudarMes(-1)} className="flex size-11 cursor-pointer items-center justify-center">
@@ -176,6 +225,7 @@ export default function Lancamentos() {
             valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
             extra={l.parcela && <span className="text-sm text-suave">{l.parcela}</span>}
             para={l.para}
+            acao={acaoDa(l, hoje, recarregar)}
           />
         ))}
       </div>

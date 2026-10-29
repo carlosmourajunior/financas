@@ -380,8 +380,16 @@ def resumo(dono, hoje: date) -> dict:
     a_vencer = sum(c["valor"] for c in contas_mes if not c["paga"]) + sum(p["valor"] for p in vencidas if p["data"] < inicio)
 
     do_mes = lanc.filter(data__gte=inicio, data__lte=fim)
+    # Gasto do mês: o que é pago fora do cartão com data no mês, mais cada fatura inteira no mês em que fecha.
+    no_mes = Q(cartao__isnull=True, data__gte=inicio, data__lte=fim)
+    faturas_que_fecham = 0
+    for c in cartoes:
+        f = fatura_que_fecha_em(c, somar_meses(inicio, 0, c.dia_fechamento))
+        no_mes |= Q(cartao=c, data__gte=f.abre, data__lte=f.fecha)
+        faturas_que_fecham += f.total
+    gastos = lanc.filter(no_mes, natureza=Natureza.DESPESA)
     categorias = (
-        do_mes.filter(natureza=Natureza.DESPESA)
+        gastos
         .values("categoria__nome")
         .annotate(valor=Sum("valor"))
         .order_by("-valor")
@@ -429,7 +437,9 @@ def resumo(dono, hoje: date) -> dict:
         "vencem_hoje": [p for p in pendentes if p["data"] == hoje],
         # Estorno no cartão abate a fatura, não é dinheiro que entrou.
         "entrou": _soma(do_mes.filter(natureza=Natureza.RECEITA, cartao__isnull=True)),
-        "saiu": _soma(do_mes.filter(natureza=Natureza.DESPESA)),
+        "saiu": _soma(gastos.filter(cartao__isnull=True)) + faturas_que_fecham,
+        # Parcelas de compras de meses anteriores: entram no gasto, mas não são compra nova.
+        "parcelas_anteriores": _soma(gastos.filter(parcela_atual__gt=1)),
         "categorias": [{"nome": c["categoria__nome"] or "Sem categoria", "valor": c["valor"]} for c in categorias],
         "faturas": faturas,
         "compromisso_proximo_mes": compromisso,

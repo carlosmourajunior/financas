@@ -174,12 +174,22 @@ export default function Inicio() {
               <Numero rotulo="Entrou" valor={m(r.entrou)} classe="text-musgo" />
               <Numero rotulo="Saiu" valor={m(r.saiu)} />
             </div>
+            <p className="pt-2 text-sm text-suave">Saiu soma as contas do mês e, de cada cartão, a fatura inteira que fecha neste mês.</p>
             <p className="pt-3 text-[15px] text-suave lg:hidden">
               Em conta agora: <strong className="text-tinta">{m(r.saldo_em_conta)}</strong>
             </p>
           </Secao>
 
           <Secao titulo="Para onde foi o dinheiro" acao={<LinkAcao to="/lancamentos">Detalhes</LinkAcao>}>
+            <p className="pb-1.5 text-[15px] text-suave">
+              As contas de {MESES[hoje.getMonth()]} e as compras das faturas que fecham neste mês
+              {r.parcelas_anteriores > 0 && (
+                <>
+                  . Destes, <strong className="text-tinta">{m(r.parcelas_anteriores)}</strong> são parcelas de compras de meses anteriores
+                </>
+              )}
+              .
+            </p>
             {r.categorias.length === 0 && <p className="py-2.5 text-[15px] text-suave">Nenhuma despesa lançada este mês.</p>}
             {r.categorias.map((c) => (
               <div key={c.nome} className="flex flex-col gap-1.5 border-b border-linha py-2.5">

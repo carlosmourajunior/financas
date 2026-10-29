@@ -64,6 +64,7 @@ export interface Resumo {
   entrou: number
   saiu: number
   categorias: { nome: string; valor: number }[]
+  parcelas_anteriores: number
   faturas: { cartao: number; nome: string; total: number; fecha: string; vence: string; aberta: boolean; limite: number; disponivel: number }[]
   compromisso_proximo_mes: number
   entradas_proximo_mes: number

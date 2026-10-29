@@ -13,3 +13,8 @@ export function pagarFatura(cartao: number, fecha: string) {
 export function desfazerPagamentoFatura(id: number) {
   return api(`/pagamentos-fatura/${id}/`, { method: 'DELETE' })
 }
+
+/** Apaga o lançamento; com `seguintes`, também as próximas parcelas ou ocorrências da recorrência. */
+export function excluirLancamento(id: number, seguintes: boolean) {
+  return api(`/lancamentos/${id}/${seguintes ? '?seguintes=1' : ''}`, { method: 'DELETE' })
+}

@@ -211,10 +211,21 @@ export default function Inicio() {
               )
             })}
           </Secao>
-          <Secao titulo={`${maiuscula(proximoMes)} já tem compromisso`}>
+          <Secao
+            titulo={`${maiuscula(proximoMes)} já tem compromisso`}
+            acao={<LinkAcao to={`/lancamentos?mes=${isoMes(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1))}`}>Ver</LinkAcao>}
+          >
             <p className="text-[15px] leading-relaxed text-suave">
               Parcelas e contas fixas somam <strong className="text-tinta">{m(r.compromisso_proximo_mes)}</strong>
-              {r.entrou > 0 ? `, cerca de ${pct(r.compromisso_proximo_mes, r.entrou)} do que entrou este mês.` : '.'}
+              {r.entradas_proximo_mes > 0 ? (
+                <>
+                  , e estão previstos <strong className="text-musgo">{m(r.entradas_proximo_mes)}</strong> de recebimentos.
+                </>
+              ) : r.entrou > 0 ? (
+                `, cerca de ${pct(r.compromisso_proximo_mes, r.entrou)} do que entrou este mês.`
+              ) : (
+                '.'
+              )}
             </p>
           </Secao>
         </div>

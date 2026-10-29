@@ -98,10 +98,10 @@ def gerar_ocorrencias(dono, ate: date) -> int:
     return criadas
 
 
-def projetar_recorrencias(dono, inicio: date, fim: date) -> int:
-    """Soma das despesas recorrentes que cairiam no período, sem gravar nada."""
+def projetar_recorrencias(dono, inicio: date, fim: date, natureza: str = Natureza.DESPESA) -> int:
+    """Soma das recorrências (despesas, ou receitas) que cairiam no período, sem gravar nada."""
     total = 0
-    for rec in Recorrencia.objects.filter(dono=dono, ativa=True, natureza=Natureza.DESPESA):
+    for rec in Recorrencia.objects.filter(dono=dono, ativa=True, natureza=natureza):
         data = rec.inicio
         while data <= fim and (rec.fim is None or data <= rec.fim):
             if data >= inicio:
@@ -388,6 +388,9 @@ def resumo(dono, hoje: date) -> dict:
     prox_fim = fim_do_mes(prox_inicio)
     compromisso = _soma(lanc.filter(natureza=Natureza.DESPESA, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim))
     compromisso += projetar_recorrencias(dono, prox_inicio, prox_fim)
+    entradas_previstas = _soma(
+        lanc.filter(natureza=Natureza.RECEITA, cartao__isnull=True, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim)
+    ) + projetar_recorrencias(dono, prox_inicio, prox_fim, Natureza.RECEITA)
 
     # Por cartão, a fatura fechada que falta pagar; sem ela, a aberta.
     faturas = []
@@ -427,6 +430,7 @@ def resumo(dono, hoje: date) -> dict:
         "categorias": [{"nome": c["categoria__nome"] or "Sem categoria", "valor": c["valor"]} for c in categorias],
         "faturas": faturas,
         "compromisso_proximo_mes": compromisso,
+        "entradas_proximo_mes": entradas_previstas,
         "emprestimos": {
             "devo_total": sum(saldo_emp(e) for e in devo),
             "devo_por_mes": sum(e.parcela_valor or 0 for e in devo if saldo_emp(e) > 0),

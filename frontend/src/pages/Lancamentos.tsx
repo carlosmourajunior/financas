@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
@@ -8,7 +8,7 @@ import type { Pagina } from '../lib/api'
 import { useCadastros } from '../lib/cadastros'
 import { MESES, isoData, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda } from '../lib/format'
-import { desfazerPagamentoFatura, marcarLancamento, pagarFatura } from '../lib/pagar'
+import { desfazerPagamentoFatura, excluirLancamento, marcarLancamento, pagarFatura } from '../lib/pagar'
 import type { FaturaDoMes, Lancamento } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
@@ -60,13 +60,51 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void) {
   }
   if (!l.lancamento) return null
   const id = l.lancamento
-  if (l.pago) return <BotaoPagar discreto rotulo="Desfazer" acao={() => marcarLancamento(id, false)} aoMudar={aoMudar} />
-  return (
+  const pagar = l.pago ? (
+    <BotaoPagar discreto rotulo="Desfazer" acao={() => marcarLancamento(id, false)} aoMudar={aoMudar} />
+  ) : (
     <BotaoPagar
       rotulo={l.natureza === 'receita' ? 'Marcar como recebido' : 'Marcar como pago'}
       acao={() => marcarLancamento(id, true)}
       aoMudar={aoMudar}
     />
+  )
+  return <Excluir l={l} id={id} aoMudar={aoMudar} antes={pagar} />
+}
+
+/** "Excluir" com confirmação; parcelas e recorrentes perguntam se vão também as próximas. */
+function Excluir({ l, id, aoMudar, antes }: { l: Linha; id: number; aoMudar: () => void; antes: ReactNode }) {
+  const [confirmando, setConfirmando] = useState(false)
+  const serie = l.tipo === 'recorrente' || l.tipo === 'parcelada'
+  if (!confirmando) {
+    return (
+      <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {antes}
+        <button
+          type="button"
+          onClick={() => setConfirmando(true)}
+          className="min-h-7 cursor-pointer text-[13px] font-semibold text-suave underline underline-offset-2"
+        >
+          Excluir
+        </button>
+      </span>
+    )
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2 rounded-[10px] bg-nevoa px-3 py-2">
+      <span className="text-sm font-semibold">{serie ? 'Excluir qual?' : 'Excluir este lançamento?'}</span>
+      <BotaoPagar rotulo={serie ? 'Só este' : 'Excluir'} acao={() => excluirLancamento(id, false)} aoMudar={aoMudar} />
+      {serie && (
+        <BotaoPagar
+          rotulo={l.tipo === 'recorrente' ? 'Este e os próximos' : 'Esta e as próximas parcelas'}
+          acao={() => excluirLancamento(id, true)}
+          aoMudar={aoMudar}
+        />
+      )}
+      <button type="button" onClick={() => setConfirmando(false)} className="min-h-10 cursor-pointer px-2 text-sm font-semibold text-suave">
+        Cancelar
+      </button>
+    </span>
   )
 }
 
@@ -75,14 +113,14 @@ function NovoBotoes() {
     <>
       <Link to="/lancamentos/novo" className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-tinta px-3.5 text-[15px] font-bold text-white">
         <Icon name="mais" size={18} strokeWidth={2} />
-        Novo pagamento
+        Pagamento
       </Link>
       <Link
         to="/lancamentos/novo?natureza=receita"
         className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-musgo px-3.5 text-[15px] font-bold text-white"
       >
         <Icon name="mais" size={18} strokeWidth={2} />
-        Novo recebimento
+        Recebimento
       </Link>
     </>
   )
@@ -96,9 +134,11 @@ function combina(l: Linha, f: Filtro) {
 
 export default function Lancamentos() {
   const [filtro, setFiltro] = useState<Filtro>('todos')
+  // ?mes=AAAA-MM abre outro mês (vindo do Início, por exemplo).
+  const [busca] = useSearchParams()
   const [mes, setMes] = useState(() => {
-    const d = new Date()
-    return new Date(d.getFullYear(), d.getMonth(), 1)
+    const pedido = /^\d{4}-\d{2}$/.test(busca.get('mes') ?? '') ? lerData(`${busca.get('mes')}-01`) : new Date()
+    return new Date(pedido.getFullYear(), pedido.getMonth(), 1)
   })
   // Compras no cartão ficam em Cartões; aqui entra só o total de cada fatura.
   const resposta = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${isoMes(mes)}&sem_cartao=1&limit=1000`)

@@ -121,17 +121,26 @@ export default function Inicio() {
               )}
             </div>
             <p className="text-[15px] text-tinta-claro">
-              até {ultimoDia} de {MESES[hoje.getMonth()]}, já descontadas as contas que ainda vencem
+              até {ultimoDia} de {MESES[hoje.getMonth()]}, já descontadas as contas que ainda vencem e as faturas já fechadas
             </p>
           </div>
           <ReguaDoMes hoje={hoje} contas={r.contas_do_mes} />
         </div>
 
         <div className="flex flex-col justify-end">
-          <div className="hidden pb-1.5 text-base font-bold lg:block">Ainda vence este mês</div>
-          {aVencer.length === 0 && (
+          <div className="hidden pb-1.5 text-base font-bold lg:block">Ainda vai sair da conta</div>
+          {aVencer.length === 0 && r.fechadas_a_pagar.length === 0 && (
             <p className="border-t border-white/20 py-3 text-[15px] text-tinta-claro">Nenhuma conta a vencer até o fim do mês.</p>
           )}
+          {r.fechadas_a_pagar.map((f) => (
+            <div key={f.cartao} className="flex items-center gap-3 border-t border-white/20 py-3">
+              <span className="size-2.5 shrink-0 rounded-full bg-ambar" />
+              <span className="grow text-[15px]">
+                {f.nome}, já fechada, vence {diaMes(f.vence)}
+              </span>
+              <span className="text-[15px] font-bold tabular-nums">{m(f.valor)}</span>
+            </div>
+          ))}
           {aVencer.map((c, i) => (
             <div key={i} className="flex items-center gap-3 border-t border-white/20 py-3">
               <span className="size-2.5 shrink-0 rounded-full bg-ambar" />
@@ -170,11 +179,19 @@ export default function Inicio() {
       <div className="grid gap-8 px-5 pt-5 lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:gap-10 lg:px-0 lg:pt-0">
         <div className="flex flex-col gap-8">
           <Secao titulo={`${maiuscula(MESES[hoje.getMonth()])} até agora`}>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <Numero rotulo="Entrou" valor={m(r.entrou)} classe="text-musgo" />
-              <Numero rotulo="Saiu" valor={m(r.saiu)} />
+              <Numero rotulo="Gastou" valor={m(r.saiu)} />
+              <Numero rotulo="Sai da conta" valor={m(r.sai_da_conta)} />
             </div>
-            <p className="pt-2 text-sm text-suave">Saiu soma as contas do mês e, de cada cartão, a fatura inteira que fecha neste mês.</p>
+            <ul className="flex flex-col gap-1 pt-2.5 text-sm text-suave">
+              <li>
+                <strong className="text-tinta">Gastou</strong>: as contas do mês e, de cada cartão, a fatura que fecha em {MESES[hoje.getMonth()]}.
+              </li>
+              <li>
+                <strong className="text-tinta">Sai da conta</strong>: as contas do mês e as faturas que vencem em {MESES[hoje.getMonth()]}.
+              </li>
+            </ul>
             <p className="pt-3 text-[15px] text-suave lg:hidden">
               Em conta agora: <strong className="text-tinta">{m(r.saldo_em_conta)}</strong>
             </p>
@@ -200,6 +217,12 @@ export default function Inicio() {
                 <Barra largura={pct(c.valor, maiorCategoria)} altura="h-1.5" />
               </div>
             ))}
+            {r.creditos_cartao > 0 && (
+              <div className="flex justify-between border-b border-linha py-2.5 text-[15px]">
+                <span className="font-semibold">Créditos e estornos no cartão</span>
+                <span className="font-bold tabular-nums text-musgo">- {m(r.creditos_cartao)}</span>
+              </div>
+            )}
           </Secao>
         </div>
 

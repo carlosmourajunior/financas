@@ -220,13 +220,29 @@ class SaiuDoMesTests(ApiBase):
         Lancamento.objects.create(dono=self.usuario, conta=self.conta, descricao="Luz", valor=9_000, natureza="despesa", data=date(2026, 10, 8))
         r = resumo(self.usuario, date(2026, 10, 27))
         self.assertEqual(r["saiu"], 9_000 + 5_000 - 1_000)
+        # Vence dia 10: a mesma fatura também sai da conta em outubro.
+        self.assertEqual(r["sai_da_conta"], 9_000 + 5_000 - 1_000)
         # As categorias usam as mesmas compras; a de 20/10 é da fatura de novembro.
         self.assertEqual(sum(c["valor"] for c in r["categorias"]), 9_000 + 5_000)
+        self.assertEqual(r["creditos_cartao"], 1_000)
 
     def test_parcelas_de_compras_anteriores_aparecem_separadas(self):
         self.lancar(descricao="TV", valor=40_000, tipo="parcelada", parcelas=4, cartao=self.cartao.id, data="2026-08-10")
         r = resumo(self.usuario, date(2026, 10, 27))
         self.assertEqual(r["parcelas_anteriores"], 10_000)
+
+
+class GastoECaixaTests(ApiBase):
+    def test_fatura_que_vence_no_mes_seguinte_e_gasto_agora_e_sai_da_conta_depois(self):
+        itau = Cartao.objects.create(dono=self.usuario, nome="Itaú", limite=1_000_000, dia_fechamento=23, dia_vencimento=1)
+        Lancamento.objects.create(dono=self.usuario, cartao=itau, descricao="Mercado", valor=5_000, natureza="despesa", data=date(2026, 10, 10))
+        out = resumo(self.usuario, date(2026, 10, 27))
+        self.assertEqual((out["saiu"], out["sai_da_conta"]), (5_000, 0))
+        # Já fechou em 23/10 e vence 01/11: desconta do que ainda dá para gastar em outubro.
+        self.assertEqual(out["a_vencer"], 5_000)
+        self.assertEqual([f["valor"] for f in out["fechadas_a_pagar"]], [5_000])
+        nov = resumo(self.usuario, date(2026, 11, 5))
+        self.assertEqual((nov["saiu"], nov["sai_da_conta"]), (0, 5_000))
 
 
 class ExcluirTests(ApiBase):

@@ -82,6 +82,7 @@ export interface CompraNoCartao {
   valor: number
   natureza: Natureza
   categoria: string | null
+  categoria_id: number | null
   parcela_atual: number | null
   parcela_total: number | null
 }

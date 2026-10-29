@@ -234,6 +234,7 @@ def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | Non
                 "valor": l.valor,
                 "natureza": l.natureza,
                 "categoria": l.categoria.nome if l.categoria else None,
+                "categoria_id": l.categoria_id,
                 "parcela_atual": l.parcela_atual,
                 "parcela_total": l.parcela_total,
             }

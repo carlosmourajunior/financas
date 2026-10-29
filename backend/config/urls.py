@@ -16,6 +16,7 @@ router.register("lancamentos", fin.LancamentoViewSet, basename="lancamento")
 router.register("recorrencias", fin.RecorrenciaViewSet, basename="recorrencia")
 router.register("emprestimos", fin.EmprestimoViewSet, basename="emprestimo")
 router.register("pagamentos-emprestimo", fin.PagamentoEmprestimoViewSet, basename="pagamento-emprestimo")
+router.register("pagamentos-fatura", fin.PagamentoFaturaViewSet, basename="pagamento-fatura")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -25,6 +26,7 @@ urlpatterns = [
     path("api/auth/token/renovar/", TokenRefreshView.as_view()),
     path("api/auth/eu/", EuView.as_view()),
     path("api/resumo/", fin.ResumoView.as_view()),
+    path("api/faturas/", fin.FaturasView.as_view()),
     path("api/importar/fatura/", imp.PreviaFaturaView.as_view()),
     path("api/importar/fatura/confirmar/", imp.ConfirmarFaturaView.as_view()),
     path("api/", include(router.urls)),

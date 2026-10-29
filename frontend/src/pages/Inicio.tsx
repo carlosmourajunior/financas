@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import BotaoPagar from '../components/BotaoPagar'
 import { FormConta } from '../components/Formularios'
 import Icon from '../components/Icon'
 import ReguaDoMes from '../components/ReguaDoMes'
@@ -9,7 +10,8 @@ import { useAuth } from '../lib/auth'
 import { nomeCartao, useCadastros } from '../lib/cadastros'
 import { DIAS, MESES, diaMes, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda, moedaPartes, pct } from '../lib/format'
-import type { Lancamento, Resumo } from '../lib/tipos'
+import { marcarLancamento, pagarFatura } from '../lib/pagar'
+import type { Lancamento, Pendencia, Resumo } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
 const OCULTO = 'R$ ••••'
@@ -32,7 +34,7 @@ export default function Inicio() {
   const resumo = useApi<Resumo>('/resumo/')
   const cad = useCadastros()
   const mesAtual = isoMes(new Date())
-  const ultimos = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${mesAtual}&limit=6`)
+  const ultimos = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${mesAtual}&sem_cartao=1&limit=6`)
 
   if (resumo.erro) return <p className="px-5 py-10 text-center text-suave">Não foi possível carregar o resumo. {resumo.erro}</p>
   if (!resumo.dados || cad.carregando) return <p className="px-5 py-10 text-center text-suave">Carregando…</p>
@@ -81,7 +83,11 @@ export default function Inicio() {
           </Link>
           <Link to="/lancamentos/novo" className="flex min-h-12 items-center gap-2 rounded-xl bg-tinta px-4 text-[15px] font-bold text-white">
             <Icon name="mais" size={18} strokeWidth={2} />
-            Novo lançamento
+            Novo pagamento
+          </Link>
+          <Link to="/lancamentos/novo?natureza=receita" className="flex min-h-12 items-center gap-2 rounded-xl bg-musgo px-4 text-[15px] font-bold text-white">
+            <Icon name="mais" size={18} strokeWidth={2} />
+            Novo recebimento
           </Link>
         </div>
       </div>
@@ -143,18 +149,22 @@ export default function Inicio() {
       </section>
 
       <div className="flex gap-2 px-5 pb-2 pt-5 lg:hidden">
-        <Link to="/lancamentos/novo" className={`${botaoSecundario} flex-1`}>
+        <Link to="/lancamentos/novo" className={`${botaoSecundario} flex-1 px-2`}>
           <Icon name="mais" size={18} strokeWidth={2} />
-          Lançar
+          Pagamento
         </Link>
-        <Link to="/importar" className={`${botaoSecundario} flex-1`}>
+        <Link to="/lancamentos/novo?natureza=receita" className={`${botaoSecundario} flex-1 px-2 text-musgo`}>
+          <Icon name="mais" size={18} strokeWidth={2} />
+          Recebimento
+        </Link>
+        <Link to="/importar" className={`${botaoSecundario} flex-1 px-2`}>
           <Icon name="importar" size={18} strokeWidth={2} />
           Importar
         </Link>
-        <Link to="/cartoes" className={`${botaoSecundario} flex-1`}>
-          <Icon name="cartao" size={18} strokeWidth={2} />
-          Cartões
-        </Link>
+      </div>
+
+      <div className="px-5 pt-5 lg:px-0 lg:pt-0">
+        <Pendencias vencidas={r.vencidas} hoje={r.vencem_hoje} m={m} aoMudar={resumo.recarregar} />
       </div>
 
       <div className="grid gap-8 px-5 pt-5 lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:gap-10 lg:px-0 lg:pt-0">
@@ -263,6 +273,61 @@ export default function Inicio() {
           </div>
         </Secao>
       </div>
+    </div>
+  )
+}
+
+/** Contas que já venceram sem pagamento e as que vencem hoje, com o botão de pagar ao lado. */
+function Pendencias({ vencidas, hoje, m, aoMudar }: { vencidas: Pendencia[]; hoje: Pendencia[]; m: (c: number) => string; aoMudar: () => void }) {
+  if (vencidas.length === 0 && hoje.length === 0) {
+    return <p className="rounded-[14px] bg-nevoa px-4 py-3 text-[15px] text-suave">Nenhuma conta vencida nem vencendo hoje.</p>
+  }
+  const soma = (l: Pendencia[]) => l.reduce((s, p) => s + p.valor, 0)
+  return (
+    <div className="grid gap-x-10 gap-y-6 lg:grid-cols-2">
+      {vencidas.length > 0 && (
+        <Secao titulo={`Vencidas, ${m(soma(vencidas))}`}>
+          {vencidas.map((p) => (
+            <LinhaPendencia key={chave(p)} p={p} quando={`Venceu em ${porExtenso(p.data)}`} m={m} aoMudar={aoMudar} />
+          ))}
+        </Secao>
+      )}
+      {hoje.length > 0 && (
+        <Secao titulo={`Vencem hoje, ${m(soma(hoje))}`}>
+          {hoje.map((p) => (
+            <LinhaPendencia key={chave(p)} p={p} quando="Vence hoje" m={m} aoMudar={aoMudar} />
+          ))}
+        </Secao>
+      )}
+    </div>
+  )
+}
+
+function chave(p: Pendencia) {
+  return p.tipo === 'fatura' ? `f${p.cartao}-${p.fecha}` : `l${p.id}`
+}
+
+function LinhaPendencia({ p, quando, m, aoMudar }: { p: Pendencia; quando: string; m: (c: number) => string; aoMudar: () => void }) {
+  const fatura = p.tipo === 'fatura'
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-linha py-3">
+      <span className="size-2.5 shrink-0 rounded-full bg-ambar" />
+      <span className="flex min-w-0 grow flex-col">
+        {fatura ? (
+          <Link to={`/cartoes?cartao=${p.cartao}&fecha=${p.fecha}`} className="text-base font-bold underline-offset-2 hover:underline">
+            {p.nome}
+          </Link>
+        ) : (
+          <span className="text-base font-bold">{p.nome}</span>
+        )}
+        <span className="text-sm font-semibold text-ambar-texto">{quando}</span>
+      </span>
+      <span className="text-base font-bold tabular-nums">{m(p.valor)}</span>
+      <BotaoPagar
+        rotulo={fatura ? 'Marcar como paga' : 'Marcar como pago'}
+        acao={() => (p.tipo === 'fatura' ? pagarFatura(p.cartao, p.fecha) : marcarLancamento(p.id, true))}
+        aoMudar={aoMudar}
+      />
     </div>
   )
 }

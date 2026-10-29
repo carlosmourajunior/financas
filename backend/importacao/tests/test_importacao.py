@@ -139,6 +139,54 @@ class ServicosTests(TestCase):
         self.assertEqual([l.parcela_atual for l in parcelas], [1, 2, 3])
 
 
+class ParcelasSemDuplicarTests(TestCase):
+    """Itaú fecha dia 24: a fatura de setembro fecha em 24/09, a de outubro em 24/10."""
+
+    def setUp(self):
+        self.usuario = Usuario.objects.create_user(email="a@exemplo.com", password="senha-forte-123", nome="A")
+        self.cartao = Cartao.objects.create(dono=self.usuario, nome="Itaú", limite=1_000_000, dia_fechamento=24, dia_vencimento=1)
+
+    def importar(self, fecha, *parcelas):
+        itens = [
+            {"data": date(2026, 4, 10), "descricao": d, "valor": v, "natureza": "despesa", "parcela_atual": a, "parcela_total": t}
+            for d, v, a, t in parcelas
+        ]
+        return confirmar(self.cartao, fecha, itens)
+
+    def parcelas(self, descricao="COMERCIAL TAMO"):
+        return list(Lancamento.objects.filter(descricao=descricao).order_by("parcela_atual", "valor").values_list("parcela_atual", flat=True))
+
+    def test_mes_a_mes_nao_duplica(self):
+        self.importar(date(2026, 9, 24), ("COMERCIAL TAMO", 29_624, 7, 10))
+        self.importar(date(2026, 10, 24), ("COMERCIAL TAMO", 29_624, 8, 10))
+        self.importar(date(2026, 11, 24), ("COMERCIAL TAMO", 29_625, 9, 10))  # banco ajustou um centavo
+        self.assertEqual(self.parcelas(), [7, 8, 9, 10])
+        # Todas são a mesma compra.
+        self.assertEqual(Lancamento.objects.values("grupo").distinct().count(), 1)
+        self.assertEqual(fatura_que_fecha_em(self.cartao, date(2026, 11, 24)).total, 29_625)
+
+    def test_fora_de_ordem_nao_duplica_nem_apaga_a_real(self):
+        self.importar(date(2026, 10, 24), ("COMERCIAL TAMO", 29_624, 8, 10))
+        self.importar(date(2026, 9, 24), ("COMERCIAL TAMO", 29_624, 7, 10))
+        self.assertEqual(self.parcelas(), [7, 8, 9, 10])
+
+    def test_duas_compras_iguais_ficam_separadas(self):
+        self.importar(date(2026, 9, 24), ("COMERCIAL TAMO", 10_000, 2, 3), ("COMERCIAL TAMO", 10_000, 2, 3))
+        self.importar(date(2026, 10, 24), ("COMERCIAL TAMO", 10_000, 3, 3), ("COMERCIAL TAMO", 10_000, 3, 3))
+        self.assertEqual(self.parcelas(), [2, 2, 3, 3])
+
+    def test_compra_que_comecou_em_outro_mes_e_outra_compra(self):
+        self.importar(date(2026, 9, 24), ("COMERCIAL TAMO", 10_000, 2, 3))
+        self.importar(date(2026, 10, 24), ("COMERCIAL TAMO", 10_000, 3, 3), ("COMERCIAL TAMO", 10_000, 1, 3))
+        # Setembro 2/3 e outubro 3/3 são uma compra; a 1/3 de outubro é outra, com 1, 2 e 3.
+        self.assertEqual(self.parcelas(), [1, 2, 2, 3, 3])
+
+    def test_reimportar_o_mesmo_mes_nao_duplica(self):
+        for _ in range(2):
+            self.importar(date(2026, 9, 24), ("COMERCIAL TAMO", 29_624, 7, 10))
+        self.assertEqual(self.parcelas(), [7, 8, 9, 10])
+
+
 class ApiTests(APITestCase):
     def setUp(self):
         self.usuario = Usuario.objects.create_user(email="a@exemplo.com", password="senha-forte-123", nome="A")

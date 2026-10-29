@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Erro } from '../components/Formularios'
 import Icon from '../components/Icon'
 import { Abas, Campo, botaoPrimario, campo } from '../components/ui'
@@ -21,7 +21,8 @@ type Frequencia = 'mensal' | 'semanal' | 'anual'
 export default function NovoLancamento() {
   const navigate = useNavigate()
   const cad = useCadastros()
-  const [natureza, setNatureza] = useState<Natureza>('despesa')
+  const [busca] = useSearchParams()
+  const [natureza, setNatureza] = useState<Natureza>(busca.get('natureza') === 'receita' ? 'receita' : 'despesa')
   const [tipo, setTipo] = useState<Tipo>('unica')
   const [valor, setValor] = useState('')
   const [parcelas, setParcelas] = useState(2)
@@ -32,6 +33,8 @@ export default function NovoLancamento() {
   const [data, setData] = useState(() => isoData(new Date()))
   // "conta:3" ou "cartao:5"; vazio usa a primeira conta.
   const [meio, setMeio] = useState('')
+  // Sem escolha, o que tem data até hoje já foi pago; o que é para depois fica em aberto.
+  const [jaPago, setJaPago] = useState<boolean | null>(null)
 
   const total = paraCentavos(valor)
   const porParcela = parcelas > 0 ? Math.round(total / parcelas) : 0
@@ -39,6 +42,9 @@ export default function NovoLancamento() {
   const ultima = new Date(d.getFullYear(), d.getMonth() + parcelas - 1, 1)
   const categorias = cad.categorias.filter((c) => c.natureza === natureza)
   const meioEscolhido = meio || (cad.contas[0] ? `conta:${cad.contas[0].id}` : '')
+  const pago = jaPago ?? data <= isoData(new Date())
+  // Compra no cartão é paga na fatura. Parcelas e recorrentes seguem a data: as que já passaram contam como pagas.
+  const perguntaPago = tipo === 'unica' && meioEscolhido.startsWith('conta')
 
   const { erro, enviando, enviar } = useEnvio(async () => {
     if (total <= 0) throw new Error('Informe um valor maior que zero.')
@@ -54,6 +60,7 @@ export default function NovoLancamento() {
         categoria: categoria ? Number(categoria) : null,
         conta: qual === 'conta' ? Number(id) : null,
         cartao: qual === 'cartao' ? Number(id) : null,
+        ...(perguntaPago ? { pago } : {}),
         ...(tipo === 'parcelada' ? { parcelas } : {}),
         ...(tipo === 'recorrente' ? { frequencia, fim: fim || null } : {}),
       },
@@ -200,6 +207,12 @@ export default function NovoLancamento() {
             ))}
           </select>
         </Campo>
+        {perguntaPago && (
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-base font-semibold">
+            <input type="checkbox" checked={pago} onChange={(e) => setJaPago(e.target.checked)} className="size-5 shrink-0 cursor-pointer accent-tinta" />
+            {natureza === 'despesa' ? 'Já paguei' : 'Já recebi'}
+          </label>
+        )}
         {!cad.carregando && cad.contas.length === 0 && cad.cartoes.length === 0 && (
           <p className="text-[15px] text-suave">
             Você ainda não tem conta nem cartão. <Link to="/" className="font-bold text-tinta">Cadastre uma conta no Início</Link>.

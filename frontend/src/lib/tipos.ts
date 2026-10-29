@@ -59,6 +59,8 @@ export interface Resumo {
   a_vencer: number
   livre_para_gastar: number
   contas_do_mes: ContaDoMes[]
+  vencidas: Pendencia[]
+  vencem_hoje: Pendencia[]
   entrou: number
   saiu: number
   categorias: { nome: string; valor: number }[]
@@ -73,8 +75,45 @@ export interface Resumo {
   }
 }
 
+export interface CompraNoCartao {
+  id: number
+  data: string
+  descricao: string
+  valor: number
+  natureza: Natureza
+  categoria: string | null
+  parcela_atual: number | null
+  parcela_total: number | null
+}
+
+export interface PagamentoFatura {
+  id: number
+  valor: number
+  data: string
+}
+
+/** Conta que vence até hoje e não foi paga: um lançamento em conta ou uma fatura. */
+export type Pendencia = { nome: string; valor: number; data: string } & (
+  | { tipo: 'lancamento'; id: number }
+  | { tipo: 'fatura'; cartao: number; fecha: string }
+)
+
+export interface FaturaDoMes {
+  cartao: number
+  nome: string
+  final: string
+  abre: string
+  fecha: string
+  vence: string
+  total: number
+  paga: boolean
+  pagamento: PagamentoFatura | null
+  compras: number
+}
+
 export interface DetalheCartao {
-  fatura: { abre: string; fecha: string; vence: string; total: number }
+  fatura: { abre: string; fecha: string; vence: string; total: number; aberta: boolean; anterior: string; seguinte: string; pagamento: PagamentoFatura | null }
+  compras: CompraNoCartao[]
   limite: number
   disponivel: number
   proximas: { fecha: string; vence: string; total: number }[]

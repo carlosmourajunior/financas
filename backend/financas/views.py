@@ -6,7 +6,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Cartao, Categoria, Conta, Emprestimo, Lancamento, PagamentoEmprestimo, Recorrencia
+from .models import Cartao, Categoria, Conta, Emprestimo, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
 from .serializers import (
     CartaoSerializer,
     CategoriaSerializer,
@@ -14,9 +14,10 @@ from .serializers import (
     EmprestimoSerializer,
     LancamentoSerializer,
     PagamentoEmprestimoSerializer,
+    PagamentoFaturaSerializer,
     RecorrenciaSerializer,
 )
-from .servicos import detalhe_cartao, fim_do_mes, gerar_ocorrencias, resumo
+from .servicos import detalhe_cartao, faturas_do_mes, fim_do_mes, gerar_ocorrencias, resumo
 
 
 def ler_mes(valor: str | None) -> date | None:
@@ -53,8 +54,13 @@ class CartaoViewSet(DoUsuarioViewSet):
 
     @action(detail=True)
     def detalhe(self, request, pk=None):
-        """Fatura aberta, próximas faturas e parcelas em andamento."""
-        return Response(detalhe_cartao(self.get_object(), date.today()))
+        """Fatura (a aberta, ou ?fecha=AAAA-MM-DD) com as compras, próximas faturas e parcelas em andamento."""
+        fecha = request.query_params.get("fecha")
+        try:
+            fecha = date.fromisoformat(fecha) if fecha else None
+        except ValueError as exc:
+            raise ValidationError({"fecha": "Use o formato AAAA-MM-DD."}) from exc
+        return Response(detalhe_cartao(self.get_object(), date.today(), fecha=fecha))
 
 
 class CategoriaViewSet(DoUsuarioViewSet):
@@ -86,6 +92,9 @@ class LancamentoViewSet(DoUsuarioViewSet):
         for campo in ("natureza", "tipo", "cartao", "conta", "categoria"):
             if p.get(campo):
                 qs = qs.filter(**{campo: p[campo]})
+        if p.get("sem_cartao") in ("1", "true"):
+            # Compras no cartão aparecem pela fatura, não uma a uma.
+            qs = qs.filter(cartao__isnull=True)
         return qs
 
 
@@ -102,6 +111,19 @@ class EmprestimoViewSet(DoUsuarioViewSet):
 class PagamentoEmprestimoViewSet(DoUsuarioViewSet):
     model = PagamentoEmprestimo
     serializer_class = PagamentoEmprestimoSerializer
+
+
+class PagamentoFaturaViewSet(DoUsuarioViewSet):
+    model = PagamentoFatura
+    serializer_class = PagamentoFaturaSerializer
+
+
+class FaturasView(APIView):
+    """Faturas que vencem no mês (?mes=AAAA-MM, padrão o mês atual), uma linha por cartão."""
+
+    def get(self, request):
+        mes = ler_mes(request.query_params.get("mes")) or date.today()
+        return Response(faturas_do_mes(request.user, mes, date.today()))
 
 
 class ResumoView(APIView):

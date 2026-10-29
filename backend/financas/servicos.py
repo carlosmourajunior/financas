@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from django.db import transaction
 from django.db.models import Q, Sum
 
-from .models import Cartao, Conta, Emprestimo, Frequencia, Lancamento, Natureza, Recorrencia
+from .models import Cartao, Conta, Emprestimo, Frequencia, Lancamento, Natureza, PagamentoFatura, Recorrencia
 
 
 def somar_meses(d: date, meses: int, dia: int | None = None) -> date:
@@ -148,6 +148,12 @@ def fatura_que_fecha_em(cartao: Cartao, fechamento: date) -> Fatura:
     return Fatura(cartao, abre, fechamento, _vencimento(cartao, fechamento), total)
 
 
+def fechamento_de(cartao: Cartao, d: date) -> date:
+    """Dia em que fecha a fatura onde cai a data `d`."""
+    fecha = somar_meses(d, 0, cartao.dia_fechamento)
+    return fecha if d <= fecha else somar_meses(fecha, 1, cartao.dia_fechamento)
+
+
 def fatura_aberta(cartao: Cartao, hoje: date) -> Fatura:
     fecha_este_mes = date(hoje.year, hoje.month, cartao.dia_fechamento)
     fechamento = fecha_este_mes if hoje <= fecha_este_mes else somar_meses(fecha_este_mes, 1)
@@ -167,13 +173,15 @@ def limite_usado(cartao: Cartao, hoje: date) -> int:
     return no_cartao(Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, data__gte=abre))
 
 
-def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3) -> dict:
+def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | None = None) -> dict:
+    """Uma fatura do cartão (a aberta, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
     aberta = fatura_aberta(cartao, hoje)
+    escolhida = fatura_que_fecha_em(cartao, fecha) if fecha else aberta
     proximas = []
-    fecha = aberta.fecha
+    f_proxima = aberta.fecha
     for _ in range(meses):
-        fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
-        f = fatura_que_fecha_em(cartao, fecha)
+        f_proxima = somar_meses(f_proxima, 1, cartao.dia_fechamento)
+        f = fatura_que_fecha_em(cartao, f_proxima)
         proximas.append({"fecha": f.fecha, "vence": f.vence, "total": f.total})
 
     grupos: dict = {}
@@ -184,19 +192,44 @@ def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3) -> dict:
         ultima = itens[-1]
         if ultima.data < aberta.abre:
             continue  # compra já quitada
-        pagas = sum(1 for l in itens if l.data < aberta.abre)
+        # Vale o número da parcela gravado (07/10 da fatura importada), não quantas existem no app.
+        atual = next(l for l in itens if l.data >= aberta.abre).parcela_atual
         parcelas.append(
             {
                 "descricao": itens[0].descricao,
                 "valor": ultima.valor,
-                "atual": pagas + 1,
+                "atual": atual,
                 "total": ultima.parcela_total,
                 "termina": ultima.data,
             }
         )
 
+    compras = Lancamento.objects.filter(cartao=cartao, data__gte=escolhida.abre, data__lte=escolhida.fecha).select_related("categoria")
+    pagamento = PagamentoFatura.objects.filter(cartao=cartao, fecha=escolhida.fecha).first()
     return {
-        "fatura": {"abre": aberta.abre, "fecha": aberta.fecha, "vence": aberta.vence, "total": aberta.total},
+        "fatura": {
+            "abre": escolhida.abre,
+            "fecha": escolhida.fecha,
+            "vence": escolhida.vence,
+            "total": escolhida.total,
+            "aberta": escolhida.fecha == aberta.fecha,
+            "anterior": somar_meses(escolhida.fecha, -1, cartao.dia_fechamento),
+            "seguinte": somar_meses(escolhida.fecha, 1, cartao.dia_fechamento),
+            "pagamento": _pagamento(pagamento),
+        },
+        "compras": [
+            {
+                "id": l.id,
+                "data": l.data,
+                "descricao": l.descricao,
+                "valor": l.valor,
+                "natureza": l.natureza,
+                "categoria": l.categoria.nome if l.categoria else None,
+                "parcela_atual": l.parcela_atual,
+                "parcela_total": l.parcela_total,
+            }
+            for l in compras.order_by("data", "id")
+        ],
         "limite": cartao.limite,
         "disponivel": cartao.limite - limite_usado(cartao, hoje),
         "proximas": proximas,
@@ -204,14 +237,93 @@ def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3) -> dict:
     }
 
 
-def total_faturas_pagas(cartao: Cartao, hoje: date) -> int:
-    """Soma das faturas já vencidas, que tratamos como pagas no vencimento."""
-    fecha = fatura_aberta(cartao, hoje).fecha
-    for _ in range(3):
+def _pagamento(p: PagamentoFatura | None) -> dict | None:
+    return {"id": p.id, "valor": p.valor, "data": p.data} if p else None
+
+
+def pagamentos_por_fecha(cartao: Cartao) -> dict[date, PagamentoFatura]:
+    return {p.fecha: p for p in PagamentoFatura.objects.filter(cartao=cartao)}
+
+
+def faturas_do_mes(dono, mes: date, hoje: date) -> list[dict]:
+    """Uma linha por fatura que vence no mês, para a lista de lançamentos."""
+    inicio, fim = inicio_do_mes(mes), fim_do_mes(mes)
+    linhas = []
+    for c in Cartao.objects.filter(dono=dono):
+        pagos = pagamentos_por_fecha(c)
+        for f in faturas_vencendo(c, inicio, fim):
+            if f.total:
+                pagamento = pagos.get(f.fecha)
+                linhas.append(
+                    {
+                        "cartao": c.id,
+                        "nome": f"Fatura {c.nome}",
+                        "final": c.final,
+                        "abre": f.abre,
+                        "fecha": f.fecha,
+                        "vence": f.vence,
+                        "total": f.total,
+                        "paga": pagamento is not None,
+                        "pagamento": _pagamento(pagamento),
+                        "compras": Lancamento.objects.filter(cartao=c, data__gte=f.abre, data__lte=f.fecha).count(),
+                    }
+                )
+    return sorted(linhas, key=lambda l: l["vence"])
+
+
+def faturas_em_aberto(cartao: Cartao, ate: date, meses: int = 6) -> list[Fatura]:
+    """Faturas que vencem até `ate`, dos últimos meses, ainda sem pagamento registrado."""
+    pagos = pagamentos_por_fecha(cartao)
+    fecha = fatura_aberta(cartao, ate).fecha
+    abertas = []
+    for _ in range(meses + 1):
+        f = fatura_que_fecha_em(cartao, fecha)
+        if f.vence <= ate and f.total > 0 and f.fecha not in pagos:
+            abertas.append(f)
         fecha = somar_meses(fecha, -1, cartao.dia_fechamento)
-        if _vencimento(cartao, fecha) < hoje:
-            return no_cartao(Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, data__lte=fecha))
-    return 0
+    return sorted(abertas, key=lambda f: f.vence)
+
+
+def quitar_faturas_vencidas(cartao: Cartao, hoje: date) -> int:
+    """Registra como pagas no vencimento todas as faturas que venceram antes de hoje.
+
+    Usado para dados antigos (de quando a fatura contava como paga sozinha) e para o demo.
+    """
+    primeira = Lancamento.objects.filter(cartao=cartao).order_by("data").values_list("data", flat=True).first()
+    if not primeira:
+        return 0
+    pagos = pagamentos_por_fecha(cartao)
+    fecha = somar_meses(primeira, 0, cartao.dia_fechamento)
+    if fecha < primeira:
+        fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
+    criados = 0
+    while True:
+        f = fatura_que_fecha_em(cartao, fecha)
+        if f.vence >= hoje:
+            return criados
+        if f.total > 0 and f.fecha not in pagos:
+            PagamentoFatura.objects.create(dono=cartao.dono, cartao=cartao, fecha=f.fecha, valor=f.total, data=f.vence)
+            criados += 1
+        fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
+
+
+def pendencias(dono, hoje: date, cartoes: list[Cartao], dias: int = 180) -> list[dict]:
+    """Contas (despesas em conta e faturas) que vencem até hoje e não foram pagas."""
+    itens = [
+        {"tipo": "lancamento", "id": l.id, "nome": l.descricao, "valor": l.valor, "data": l.data}
+        for l in Lancamento.objects.filter(
+            dono=dono,
+            conta__isnull=False,
+            natureza=Natureza.DESPESA,
+            pago=False,
+            data__lte=hoje,
+            data__gte=hoje - timedelta(days=dias),
+        )
+    ]
+    for c in cartoes:
+        for f in faturas_em_aberto(c, hoje):
+            itens.append({"tipo": "fatura", "cartao": c.id, "fecha": f.fecha, "nome": f"Fatura {c}", "valor": f.total, "data": f.vence})
+    return sorted(itens, key=lambda i: (i["data"], i["nome"]))
 
 
 # Resumo do Início ---------------------------------------------------------
@@ -227,29 +339,32 @@ def resumo(dono, hoje: date) -> dict:
     lanc = Lancamento.objects.filter(dono=dono)
 
     # Saldo em conta: o que já aconteceu nas contas até hoje.
-    em_conta = lanc.filter(conta__isnull=False, pago=True, data__lte=hoje)
+    # Saldo em conta: o que já foi pago ou recebido nas contas, mais as faturas pagas.
+    em_conta = lanc.filter(conta__isnull=False, pago=True)
     cartoes = list(Cartao.objects.filter(dono=dono))
     saldo = (
         (Conta.objects.filter(dono=dono).aggregate(s=Sum("saldo_inicial"))["s"] or 0)
         + _soma(em_conta.filter(natureza=Natureza.RECEITA))
         - _soma(em_conta.filter(natureza=Natureza.DESPESA))
-        - sum(total_faturas_pagas(c, hoje) for c in cartoes)
+        - _soma(PagamentoFatura.objects.filter(dono=dono))
     )
 
     # Contas do mês para a régua: despesas em conta e faturas que vencem no mês.
-    # Assumimos que a fatura é paga no vencimento enquanto não há registro de pagamento de fatura.
     contas_mes = [
         {"dia": l.data.day, "nome": l.descricao, "valor": l.valor, "paga": l.pago}
         for l in lanc.filter(conta__isnull=False, natureza=Natureza.DESPESA, data__gte=inicio, data__lte=fim).order_by("data")
     ]
     for c in cartoes:
+        pagos = pagamentos_por_fecha(c)
         for f in faturas_vencendo(c, inicio, fim):
             if f.total:
-                contas_mes.append({"dia": f.vence.day, "nome": f"Fatura {c}", "valor": f.total, "paga": f.vence < hoje})
+                contas_mes.append({"dia": f.vence.day, "nome": f"Fatura {c}", "valor": f.total, "paga": f.fecha in pagos})
     contas_mes.sort(key=lambda c: c["dia"])
 
-    # Inclui o que já venceu e não foi pago: ainda vai sair da conta.
-    a_vencer = sum(c["valor"] for c in contas_mes if not c["paga"])
+    pendentes = pendencias(dono, hoje, cartoes)
+    vencidas = [p for p in pendentes if p["data"] < hoje]
+    # Inclui o que já venceu e não foi pago, deste mês e dos anteriores: ainda vai sair da conta.
+    a_vencer = sum(c["valor"] for c in contas_mes if not c["paga"]) + sum(p["valor"] for p in vencidas if p["data"] < inicio)
 
     do_mes = lanc.filter(data__gte=inicio, data__lte=fim)
     categorias = (
@@ -292,6 +407,8 @@ def resumo(dono, hoje: date) -> dict:
         "a_vencer": a_vencer,
         "livre_para_gastar": saldo - a_vencer,
         "contas_do_mes": contas_mes,
+        "vencidas": vencidas,
+        "vencem_hoje": [p for p in pendentes if p["data"] == hoje],
         # Estorno no cartão abate a fatura, não é dinheiro que entrou.
         "entrou": _soma(do_mes.filter(natureza=Natureza.RECEITA, cartao__isnull=True)),
         "saiu": _soma(do_mes.filter(natureza=Natureza.DESPESA)),

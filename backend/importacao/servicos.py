@@ -1,5 +1,7 @@
 """Da fatura lida para lançamentos: prévia para revisar e gravação do que foi escolhido."""
 
+import uuid
+from collections import Counter
 from datetime import date, timedelta
 
 from django.db import transaction
@@ -165,13 +167,18 @@ def previa(cartao: Cartao, lida: FaturaLida) -> dict:
     }
 
 
-def _previsoes(cartao: Cartao, depois_de: date, descricao: str, valor: int, atual: int, total: int):
-    """Parcelas futuras criadas por importações anteriores para a mesma compra."""
-    chave = normalizar(descricao)
-    candidatas = Lancamento.objects.filter(
-        cartao=cartao, importado=True, data__gt=depois_de, valor=valor, parcela_total=total, parcela_atual__gt=atual
-    )
-    return [l.pk for l in candidatas if normalizar(l.descricao) == chave]
+def chave_da_compra(fecha: date, descricao: str, atual: int, total: int, ordem: int = 1) -> str:
+    """A mesma em todas as faturas da compra: a 7/10 que fecha em setembro e a 8/10 de outubro começaram em março.
+
+    O valor fica de fora porque o banco às vezes ajusta centavos numa parcela. Compras iguais na mesma
+    fatura se separam pela ordem.
+    """
+    primeira = somar_meses(fecha, 1 - atual, 1)
+    return f"{normalizar(descricao)[:150]}|{total}|{primeira:%Y-%m}|{ordem}"
+
+
+def grupo_da_chave(cartao: Cartao, chave: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"financas:{cartao.pk}:{chave}")
 
 
 @transaction.atomic
@@ -179,7 +186,8 @@ def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
     """Grava as linhas escolhidas no ciclo que fecha em `fecha`.
 
     O que foi importado antes para este ciclo é apagado e substituído; lançamentos feitos à mão ficam.
-    Uma parcela k de n cria também as parcelas seguintes, trocando as que uma importação anterior já previu.
+    Uma parcela k de n cria também as parcelas seguintes. A compra é reconhecida pela chave em qualquer
+    fatura, então importar o mês seguinte (ou um anterior) não duplica parcelas.
     """
     ciclo = fatura_que_fecha_em(cartao, fecha)
     substituidos, _ = Lancamento.objects.filter(
@@ -188,6 +196,18 @@ def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
 
     hoje = date.today()
     criados = 0
+    # Linhas iguais da mesma compra na mesma fatura: a menor fica com ordem 1, e assim por diante.
+    ordens: Counter = Counter()
+    parceladas = sorted(
+        (i for i in itens if i.get("parcela_atual") and i.get("parcela_total") and i["parcela_total"] >= i["parcela_atual"]),
+        key=lambda i: i["valor"],
+    )
+    chaves = {}
+    for i in parceladas:
+        base = chave_da_compra(ciclo.fecha, i["descricao"], i["parcela_atual"], i["parcela_total"], 0)
+        ordens[base] += 1
+        chaves[id(i)] = chave_da_compra(ciclo.fecha, i["descricao"], i["parcela_atual"], i["parcela_total"], ordens[base])
+
     for i in itens:
         data_item = _dentro(i["data"], ciclo)
         base = {
@@ -199,23 +219,21 @@ def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
             "categoria_id": getattr(i.get("categoria"), "id", i.get("categoria")),
             "importado": True,
         }
-        atual, total = i.get("parcela_atual"), i.get("parcela_total")
-        if atual and total and total >= atual:
-            Lancamento.objects.filter(pk__in=_previsoes(cartao, ciclo.fecha, i["descricao"], i["valor"], atual, total)).delete()
-            grupo = Lancamento.novo_grupo()
-            for k in range(atual, total + 1):
+        if id(i) in chaves:
+            atual, total, chave = i["parcela_atual"], i["parcela_total"], chaves[id(i)]
+            base.update(tipo=Lancamento.Tipo.PARCELADA, parcela_total=total, chave=chave, grupo=grupo_da_chave(cartao, chave))
+            # A desta fatura é a real; as seguintes são previsão e só são criadas se ainda não existem,
+            # para não apagar uma fatura futura que já tenha sido importada.
+            Lancamento.objects.update_or_create(
+                cartao=cartao, chave=chave, parcela_atual=atual, defaults={**base, "valor": i["valor"], "data": data_item, "pago": data_item <= hoje}
+            )
+            criados += 1
+            for k in range(atual + 1, total + 1):
                 data = somar_meses(data_item, k - atual)
-                Lancamento.objects.create(
-                    **base,
-                    valor=i["valor"],
-                    data=data,
-                    tipo=Lancamento.Tipo.PARCELADA,
-                    pago=data <= hoje,
-                    grupo=grupo,
-                    parcela_atual=k,
-                    parcela_total=total,
+                _, novo = Lancamento.objects.get_or_create(
+                    cartao=cartao, chave=chave, parcela_atual=k, defaults={**base, "valor": i["valor"], "data": data, "pago": data <= hoje}
                 )
-                criados += 1
+                criados += int(novo)
         else:
             Lancamento.objects.create(**base, valor=i["valor"], data=data_item, tipo=Lancamento.Tipo.UNICA, pago=data_item <= hoje)
             criados += 1

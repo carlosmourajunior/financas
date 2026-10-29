@@ -6,7 +6,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Cartao, Categoria, Conta, Emprestimo, Lancamento, PagamentoEmprestimo, Recorrencia
+from .models import Cartao, Categoria, Conta, Emprestimo, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
 from .serializers import (
     CartaoSerializer,
     CategoriaSerializer,
@@ -14,6 +14,7 @@ from .serializers import (
     EmprestimoSerializer,
     LancamentoSerializer,
     PagamentoEmprestimoSerializer,
+    PagamentoFaturaSerializer,
     RecorrenciaSerializer,
 )
 from .servicos import detalhe_cartao, faturas_do_mes, fim_do_mes, gerar_ocorrencias, resumo
@@ -110,6 +111,11 @@ class EmprestimoViewSet(DoUsuarioViewSet):
 class PagamentoEmprestimoViewSet(DoUsuarioViewSet):
     model = PagamentoEmprestimo
     serializer_class = PagamentoEmprestimoSerializer
+
+
+class PagamentoFaturaViewSet(DoUsuarioViewSet):
+    model = PagamentoFatura
+    serializer_class = PagamentoFaturaSerializer
 
 
 class FaturasView(APIView):

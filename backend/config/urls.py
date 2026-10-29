@@ -16,6 +16,7 @@ router.register("lancamentos", fin.LancamentoViewSet, basename="lancamento")
 router.register("recorrencias", fin.RecorrenciaViewSet, basename="recorrencia")
 router.register("emprestimos", fin.EmprestimoViewSet, basename="emprestimo")
 router.register("pagamentos-emprestimo", fin.PagamentoEmprestimoViewSet, basename="pagamento-emprestimo")
+router.register("pagamentos-fatura", fin.PagamentoFaturaViewSet, basename="pagamento-fatura")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

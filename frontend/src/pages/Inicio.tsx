@@ -194,7 +194,7 @@ export default function Inicio() {
         </div>
 
         <div className="flex flex-col gap-8">
-          <Secao titulo="Faturas abertas">
+          <Secao titulo="Faturas do cartão">
             {r.faturas.length === 0 && (
               <LinhaLink to="/cartoes" titulo="Nenhum cartão cadastrado" sub="Cadastre para acompanhar as faturas" valor="" />
             )}
@@ -203,9 +203,9 @@ export default function Inicio() {
               return (
                 <LinhaLink
                   key={f.cartao}
-                  to="/cartoes"
+                  to={`/cartoes?cartao=${f.cartao}`}
                   titulo={c ? nomeCartao(c) : f.nome}
-                  sub={`fecha em ${porExtenso(f.fecha)}`}
+                  sub={f.aberta ? `aberta, fecha em ${porExtenso(f.fecha)}` : `fechada, vence em ${porExtenso(f.vence)}`}
                   valor={m(f.total)}
                 />
               )

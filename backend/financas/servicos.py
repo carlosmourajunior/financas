@@ -160,6 +160,15 @@ def fatura_aberta(cartao: Cartao, hoje: date) -> Fatura:
     return fatura_que_fecha_em(cartao, fechamento)
 
 
+def fatura_atual(cartao: Cartao, hoje: date) -> Fatura:
+    """A fatura para olhar agora: a que já fechou e ainda não foi paga; paga (ou vazia), a aberta."""
+    aberta = fatura_aberta(cartao, hoje)
+    fechada = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, cartao.dia_fechamento))
+    if fechada.total > 0 and not PagamentoFatura.objects.filter(cartao=cartao, fecha=fechada.fecha).exists():
+        return fechada
+    return aberta
+
+
 def faturas_vencendo(cartao: Cartao, inicio: date, fim: date) -> list[Fatura]:
     """Faturas (fechadas ou não) cujo vencimento cai no período."""
     aberta = fatura_aberta(cartao, inicio)
@@ -174,9 +183,9 @@ def limite_usado(cartao: Cartao, hoje: date) -> int:
 
 
 def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | None = None) -> dict:
-    """Uma fatura do cartão (a aberta, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
+    """Uma fatura do cartão (a atual, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
     aberta = fatura_aberta(cartao, hoje)
-    escolhida = fatura_que_fecha_em(cartao, fecha) if fecha else aberta
+    escolhida = fatura_que_fecha_em(cartao, fecha) if fecha else fatura_atual(cartao, hoje)
     proximas = []
     f_proxima = aberta.fecha
     for _ in range(meses):
@@ -379,9 +388,10 @@ def resumo(dono, hoje: date) -> dict:
     compromisso = _soma(lanc.filter(natureza=Natureza.DESPESA, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim))
     compromisso += projetar_recorrencias(dono, prox_inicio, prox_fim)
 
+    # Por cartão, a fatura fechada que falta pagar; sem ela, a aberta.
     faturas = []
     for c in cartoes:
-        f = fatura_aberta(c, hoje)
+        f = fatura_atual(c, hoje)
         faturas.append(
             {
                 "cartao": c.id,
@@ -389,6 +399,7 @@ def resumo(dono, hoje: date) -> dict:
                 "total": f.total,
                 "fecha": f.fecha,
                 "vence": f.vence,
+                "aberta": f.fecha >= hoje,
                 "limite": c.limite,
                 "disponivel": c.limite - limite_usado(c, hoje),
             }

@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
-from .models import Cartao, Conta, Emprestimo, Lancamento, Recorrencia
+from .models import Cartao, Conta, Emprestimo, Lancamento, PagamentoFatura, Recorrencia
 from .servicos import (
     detalhe_cartao,
     fatura_aberta,
@@ -193,6 +193,22 @@ class PagamentoDeFaturaTests(ApiBase):
         self.assertEqual(quitar_faturas_vencidas(self.cartao, date(2026, 10, 27)), 1)
         self.assertEqual(quitar_faturas_vencidas(self.cartao, date(2026, 10, 27)), 0)
         self.assertEqual(resumo(self.usuario, date(2026, 10, 27))["saldo_em_conta"], 95_000)
+
+
+class FaturaAtualTests(ApiBase):
+    def test_abre_na_fechada_sem_pagamento_e_depois_na_aberta(self):
+        # Visa fecha dia 3 e vence dia 10. Em 05/10 a de 03/10 já fechou e vence em 10/10.
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Mercado", valor=5_000, natureza="despesa", data=date(2026, 9, 20))
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Posto", valor=7_000, natureza="despesa", data=date(2026, 10, 4))
+        hoje = date(2026, 10, 5)
+        d = detalhe_cartao(self.cartao, hoje)
+        self.assertEqual((d["fatura"]["fecha"], d["fatura"]["total"], d["fatura"]["aberta"]), (date(2026, 10, 3), 5_000, False))
+        self.assertEqual(resumo(self.usuario, hoje)["faturas"][0]["total"], 5_000)
+
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 10, 3), valor=5_000, data=hoje)
+        d = detalhe_cartao(self.cartao, hoje)
+        self.assertEqual((d["fatura"]["fecha"], d["fatura"]["total"], d["fatura"]["aberta"]), (date(2026, 11, 3), 7_000, True))
+        self.assertEqual(resumo(self.usuario, hoje)["faturas"][0]["total"], 7_000)
 
 
 class VencidasTests(ApiBase):

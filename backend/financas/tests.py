@@ -211,6 +211,24 @@ class FaturaAtualTests(ApiBase):
         self.assertEqual(resumo(self.usuario, hoje)["faturas"][0]["total"], 7_000)
 
 
+class SaiuDoMesTests(ApiBase):
+    def test_saiu_conta_a_fatura_inteira_no_mes_em_que_fecha(self):
+        # Fecha dia 3: a fatura que fecha em 03/10 (compras de 04/09 a 03/10) é o gasto de outubro.
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Mercado", valor=5_000, natureza="despesa", data=date(2026, 9, 20))
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Estorno", valor=1_000, natureza="receita", data=date(2026, 9, 25))
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Posto", valor=7_000, natureza="despesa", data=date(2026, 10, 20))
+        Lancamento.objects.create(dono=self.usuario, conta=self.conta, descricao="Luz", valor=9_000, natureza="despesa", data=date(2026, 10, 8))
+        r = resumo(self.usuario, date(2026, 10, 27))
+        self.assertEqual(r["saiu"], 9_000 + 5_000 - 1_000)
+        # As categorias usam as mesmas compras; a de 20/10 é da fatura de novembro.
+        self.assertEqual(sum(c["valor"] for c in r["categorias"]), 9_000 + 5_000)
+
+    def test_parcelas_de_compras_anteriores_aparecem_separadas(self):
+        self.lancar(descricao="TV", valor=40_000, tipo="parcelada", parcelas=4, cartao=self.cartao.id, data="2026-08-10")
+        r = resumo(self.usuario, date(2026, 10, 27))
+        self.assertEqual(r["parcelas_anteriores"], 10_000)
+
+
 class ExcluirTests(ApiBase):
     def test_excluir_um_e_os_seguintes_da_recorrencia(self):
         self.lancar(descricao="Salário", valor=500_000, natureza="receita", tipo="recorrente", conta=self.conta.id, data="2026-10-05")

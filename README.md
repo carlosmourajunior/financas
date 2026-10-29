@@ -34,7 +34,7 @@ Todas as rotas, menos cadastro e login, exigem `Authorization: Bearer <token>`. 
 | `POST /api/auth/token/` | Login (`email`, `password`) |
 | `POST /api/auth/token/renovar/` | Novo token de acesso a partir do `refresh` |
 | `GET /api/auth/eu/` | Dados do usuário logado |
-| `GET /api/resumo/` | Números do Início: livre para gastar, contas do mês, vencidas e que vencem hoje, faturas a pagar, compromissos e recebimentos previstos do próximo mês, empréstimos |
+| `GET /api/resumo/` | Números do Início: livre para gastar, contas do mês, vencidas e que vencem hoje, gasto do mês (contas mais a fatura inteira de cada cartão no mês em que fecha), faturas a pagar, compromissos e recebimentos previstos do próximo mês, empréstimos |
 | `/api/lancamentos/` | Lançamentos. `?mes=AAAA-MM`, `?natureza=`, `?tipo=`, `?sem_cartao=1` (só o que não é compra no cartão). Na criação, `tipo=parcelada` com `parcelas` divide o `valor` total; `tipo=recorrente` com `frequencia` cria a regra. `DELETE .../{id}/?seguintes=1` apaga também as próximas parcelas ou ocorrências (a recorrência para) |
 | `/api/contas/`, `/api/cartoes/`, `/api/categorias/` | Cadastros básicos |
 | `/api/recorrencias/` | Ver, pausar (`ativa=false`) ou encerrar contas recorrentes |

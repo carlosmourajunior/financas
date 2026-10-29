@@ -241,6 +241,8 @@ class GastoECaixaTests(ApiBase):
         # Já fechou em 23/10 e vence 01/11: desconta do que ainda dá para gastar em outubro.
         self.assertEqual(out["a_vencer"], 5_000)
         self.assertEqual([f["valor"] for f in out["fechadas_a_pagar"]], [5_000])
+        # A fatura que vence 01/11 é o compromisso de novembro.
+        self.assertEqual(out["compromisso_proximo_mes"], 5_000)
         nov = resumo(self.usuario, date(2026, 11, 5))
         self.assertEqual((nov["saiu"], nov["sai_da_conta"]), (0, 5_000))
 

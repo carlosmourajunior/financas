@@ -1,0 +1,15 @@
+Pagamentos efetuados
+DATA VALOR EM R$
+03/08 Pagamento via conta -800,00
+P Total dos pagamentos -800,00
+Lançamentos: compras e saques
+FULANO DE TAL
+DATA ESTABELECIMENTO VALOR EM R$
+02/11 LOJA AZUL 10/12 130,90
+09/02 ACADEMIA 07/12 179,80
+lazer CIDADE
+21/08 POSTO CENTRAL 20,00 L
+outros CIDADE
+22/08 RESTAURANTE BOM 100,00
+restaurante CIDADE
+Lançamentos no cartão 430,70

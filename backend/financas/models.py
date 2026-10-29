@@ -127,6 +127,8 @@ class Lancamento(DoUsuario):
     parcela_atual = models.PositiveSmallIntegerField(null=True, blank=True)
     parcela_total = models.PositiveSmallIntegerField(null=True, blank=True)
     recorrencia = models.ForeignKey(Recorrencia, null=True, blank=True, on_delete=models.SET_NULL, related_name="ocorrencias")
+    # Veio de uma fatura importada: importar de novo o mesmo período substitui estas linhas.
+    importado = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-data", "-id"]

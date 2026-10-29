@@ -32,7 +32,7 @@ export default function Inicio() {
   const resumo = useApi<Resumo>('/resumo/')
   const cad = useCadastros()
   const mesAtual = isoMes(new Date())
-  const ultimos = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${mesAtual}&limit=6`)
+  const ultimos = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${mesAtual}&sem_cartao=1&limit=6`)
 
   if (resumo.erro) return <p className="px-5 py-10 text-center text-suave">Não foi possível carregar o resumo. {resumo.erro}</p>
   if (!resumo.dados || cad.carregando) return <p className="px-5 py-10 text-center text-suave">Carregando…</p>

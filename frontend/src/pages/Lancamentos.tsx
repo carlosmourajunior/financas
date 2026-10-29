@@ -1,33 +1,50 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Icon from '../components/Icon'
+import LinhaComData from '../components/LinhaComData'
 import { Titulo } from '../components/ui'
 import type { Pagina } from '../lib/api'
 import { useCadastros } from '../lib/cadastros'
-import { MESES, isoMes, lerData, maiuscula } from '../lib/datas'
+import { MESES, isoData, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda } from '../lib/format'
-import type { Lancamento } from '../lib/tipos'
+import type { FaturaDoMes, Lancamento } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
-type Filtro = 'todos' | 'despesa' | 'receita' | 'parcelada' | 'recorrente'
+type Filtro = 'todos' | 'despesa' | 'receita' | 'fatura' | 'recorrente' | 'parcelada'
 
 const filtros: { id: Filtro; label: string }[] = [
   { id: 'todos', label: 'Todos' },
   { id: 'despesa', label: 'Despesas' },
   { id: 'receita', label: 'Receitas' },
-  { id: 'parcelada', label: 'Parceladas' },
+  { id: 'fatura', label: 'Faturas' },
   { id: 'recorrente', label: 'Recorrentes' },
+  { id: 'parcelada', label: 'Parceladas' },
 ]
 
-const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-
-function rotuloDia(iso: string) {
-  const d = lerData(iso)
-  if (d.toDateString() === new Date().toDateString()) return 'Hoje'
-  return `${DIAS[d.getDay()]}, ${d.getDate()}`
+/** Uma linha da lista: lançamento feito à mão ou o total de uma fatura de cartão. */
+interface Linha {
+  chave: string
+  data: string
+  titulo: string
+  detalhe: string
+  valor: number
+  natureza: 'despesa' | 'receita'
+  pago: boolean
+  tipo: Lancamento['tipo'] | 'fatura'
+  parcela?: string
+  para?: string
 }
 
-function combina(l: Lancamento, f: Filtro) {
+function situacao(l: Linha, hoje: string) {
+  if (l.natureza === 'receita') return l.pago ? 'Recebido' : `A receber em ${porExtenso(l.data)}`
+  if (l.pago) return l.tipo === 'fatura' ? 'Paga no vencimento' : 'Pago'
+  if (l.data === hoje) return 'Vence hoje'
+  if (l.data < hoje) return 'Venceu e não foi pago'
+  const dias = Math.round((lerData(l.data).getTime() - lerData(hoje).getTime()) / 86_400_000)
+  return dias === 1 ? 'Vence amanhã' : `Vence em ${dias} dias`
+}
+
+function combina(l: Linha, f: Filtro) {
   if (f === 'todos') return true
   if (f === 'despesa' || f === 'receita') return l.natureza === f
   return l.tipo === f
@@ -39,23 +56,47 @@ export default function Lancamentos() {
     const d = new Date()
     return new Date(d.getFullYear(), d.getMonth(), 1)
   })
-  const resposta = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${isoMes(mes)}&limit=1000`)
+  // Compras no cartão ficam em Cartões; aqui entra só o total de cada fatura.
+  const resposta = useApi<Pagina<Lancamento>>(`/lancamentos/?mes=${isoMes(mes)}&sem_cartao=1&limit=1000`)
+  const faturas = useApi<FaturaDoMes[]>(`/faturas/?mes=${isoMes(mes)}`)
   const cad = useCadastros()
-  const lancamentos = useMemo(() => resposta.dados?.results ?? [], [resposta.dados])
   const mudarMes = (delta: number) => setMes((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1))
+  const hoje = isoData(new Date())
 
-  const grupos = useMemo(() => {
-    const out: { dia: string; itens: Lancamento[] }[] = []
-    for (const l of lancamentos.filter((l) => combina(l, filtro))) {
-      const dia = rotuloDia(l.data)
-      if (out[out.length - 1]?.dia !== dia) out.push({ dia, itens: [] })
-      out[out.length - 1].itens.push(l)
+  const linhas = useMemo(() => {
+    const out: Linha[] = (resposta.dados?.results ?? []).map((l) => ({
+      chave: `l${l.id}`,
+      data: l.data,
+      titulo: l.descricao,
+      detalhe: l.natureza === 'receita' ? cad.meio(l) : `${cad.categoria(l)}, ${cad.meio(l)}`,
+      valor: l.valor,
+      natureza: l.natureza,
+      pago: l.pago,
+      tipo: l.tipo,
+      parcela: l.parcela_total ? `parcela ${l.parcela_atual} de ${l.parcela_total}` : l.tipo === 'recorrente' ? 'todo mês' : undefined,
+    }))
+    for (const f of faturas.dados ?? []) {
+      out.push({
+        chave: `f${f.cartao}-${f.fecha}`,
+        data: f.vence,
+        titulo: f.final ? `${f.nome} final ${f.final}` : f.nome,
+        detalhe: `${f.compras} ${f.compras === 1 ? 'compra' : 'compras'}, fechou em ${porExtenso(f.fecha)}`,
+        valor: f.total,
+        natureza: f.total < 0 ? 'receita' : 'despesa',
+        pago: f.paga,
+        tipo: 'fatura',
+        para: `/cartoes?cartao=${f.cartao}&fecha=${f.fecha}`,
+      })
     }
-    return out
-  }, [filtro, lancamentos])
+    return out.sort((a, b) => a.data.localeCompare(b.data) || a.titulo.localeCompare(b.titulo))
+  }, [resposta.dados, faturas.dados, cad])
 
-  const entrou = lancamentos.filter((l) => l.natureza === 'receita').reduce((s, l) => s + l.valor, 0)
-  const saiu = lancamentos.filter((l) => l.natureza === 'despesa').reduce((s, l) => s + l.valor, 0)
+  const visiveis = linhas.filter((l) => combina(l, filtro))
+  const entrou = linhas.filter((l) => l.natureza === 'receita').reduce((s, l) => s + Math.abs(l.valor), 0)
+  const saiu = linhas.filter((l) => l.natureza === 'despesa').reduce((s, l) => s + l.valor, 0)
+  const falta = linhas.filter((l) => l.natureza === 'despesa' && !l.pago).reduce((s, l) => s + l.valor, 0)
+  const carregando = (resposta.carregando && !resposta.dados) || (faturas.carregando && !faturas.dados)
+  const erro = resposta.erro || faturas.erro
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-3.5 px-5 pt-5 lg:px-8 lg:pt-7">
@@ -85,7 +126,7 @@ export default function Lancamentos() {
         </button>
       </div>
 
-      <p className="flex gap-7">
+      <p className="flex flex-wrap gap-x-7 gap-y-2">
         <span className="flex flex-col">
           <span className="text-sm text-suave">Entrou</span>
           <span className="font-display text-[22px] font-bold text-musgo tabular-nums">{moeda(entrou)}</span>
@@ -93,6 +134,10 @@ export default function Lancamentos() {
         <span className="flex flex-col">
           <span className="text-sm text-suave">Saiu</span>
           <span className="font-display text-[22px] font-bold tabular-nums">{moeda(saiu)}</span>
+        </span>
+        <span className="flex flex-col">
+          <span className="text-sm text-suave">Falta pagar</span>
+          <span className={`font-display text-[22px] font-bold tabular-nums ${falta ? 'text-ambar-texto' : ''}`}>{moeda(falta)}</span>
         </span>
       </p>
 
@@ -111,40 +156,27 @@ export default function Lancamentos() {
         ))}
       </div>
 
-      <div className="flex flex-col">
-        {resposta.erro && <p className="py-10 text-center text-suave">Não foi possível carregar. {resposta.erro}</p>}
-        {resposta.carregando && !resposta.dados && <p className="py-10 text-center text-suave">Carregando…</p>}
-        {resposta.dados && grupos.length === 0 && (
+      <div className="flex flex-col pt-2">
+        {erro && <p className="py-10 text-center text-suave">Não foi possível carregar. {erro}</p>}
+        {carregando && <p className="py-10 text-center text-suave">Carregando…</p>}
+        {!carregando && !erro && visiveis.length === 0 && (
           <p className="py-10 text-center text-suave">
-            {lancamentos.length === 0 ? 'Nenhum lançamento neste mês.' : 'Nenhum lançamento com esse filtro neste mês.'}
+            {linhas.length === 0 ? 'Nenhum lançamento neste mês.' : 'Nenhum lançamento com esse filtro neste mês.'}
           </p>
         )}
-        {grupos.map((g) => (
-          <section key={g.dia}>
-            <h2 className="pb-1 pt-5 text-[15px] font-bold text-suave">{g.dia}</h2>
-            {g.itens.map((l) => (
-              <div key={l.id} className="flex items-center gap-3 border-b border-linha py-3">
-                <div className="flex min-w-0 grow flex-col gap-0.5">
-                  <span className="text-base font-bold">{l.descricao}</span>
-                  <span className="text-sm text-suave">
-                    {l.natureza === 'receita' ? cad.meio(l) : `${cad.categoria(l)}, ${cad.meio(l)}`}
-                    {!l.pago && ', a vencer'}
-                  </span>
-                </div>
-                <div className="flex flex-col items-end gap-0.5">
-                  <span className={`text-base font-bold tabular-nums ${l.natureza === 'receita' ? 'text-musgo' : ''}`}>
-                    {l.natureza === 'receita' ? `+ ${moeda(l.valor)}` : moeda(l.valor)}
-                  </span>
-                  {l.parcela_total && (
-                    <span className="text-sm text-suave">
-                      parcela {l.parcela_atual} de {l.parcela_total}
-                    </span>
-                  )}
-                  {l.tipo === 'recorrente' && <span className="text-sm text-suave">todo mês</span>}
-                </div>
-              </div>
-            ))}
-          </section>
+        {visiveis.map((l) => (
+          <LinhaComData
+            key={l.chave}
+            data={l.data}
+            titulo={l.titulo}
+            detalhe={l.detalhe}
+            situacao={situacao(l, hoje)}
+            alerta={!l.pago && l.natureza === 'despesa'}
+            valor={l.natureza === 'receita' ? `+ ${moeda(Math.abs(l.valor))}` : moeda(l.valor)}
+            valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
+            extra={l.parcela && <span className="text-sm text-suave">{l.parcela}</span>}
+            para={l.para}
+          />
         ))}
       </div>
     </div>

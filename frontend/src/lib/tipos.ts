@@ -73,8 +73,32 @@ export interface Resumo {
   }
 }
 
+export interface CompraNoCartao {
+  id: number
+  data: string
+  descricao: string
+  valor: number
+  natureza: Natureza
+  categoria: string | null
+  parcela_atual: number | null
+  parcela_total: number | null
+}
+
+export interface FaturaDoMes {
+  cartao: number
+  nome: string
+  final: string
+  abre: string
+  fecha: string
+  vence: string
+  total: number
+  paga: boolean
+  compras: number
+}
+
 export interface DetalheCartao {
-  fatura: { abre: string; fecha: string; vence: string; total: number }
+  fatura: { abre: string; fecha: string; vence: string; total: number; aberta: boolean; anterior: string; seguinte: string }
+  compras: CompraNoCartao[]
   limite: number
   disponivel: number
   proximas: { fecha: string; vence: string; total: number }[]

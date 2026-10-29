@@ -35,11 +35,12 @@ Todas as rotas, menos cadastro e login, exigem `Authorization: Bearer <token>`. 
 | `POST /api/auth/token/renovar/` | Novo token de acesso a partir do `refresh` |
 | `GET /api/auth/eu/` | Dados do usuário logado |
 | `GET /api/resumo/` | Números do Início: livre para gastar, contas do mês, faturas, empréstimos |
-| `/api/lancamentos/` | Lançamentos. `?mes=AAAA-MM`, `?natureza=`, `?tipo=`. Na criação, `tipo=parcelada` com `parcelas` divide o `valor` total; `tipo=recorrente` com `frequencia` cria a regra |
+| `/api/lancamentos/` | Lançamentos. `?mes=AAAA-MM`, `?natureza=`, `?tipo=`, `?sem_cartao=1` (só o que não é compra no cartão). Na criação, `tipo=parcelada` com `parcelas` divide o `valor` total; `tipo=recorrente` com `frequencia` cria a regra |
 | `/api/contas/`, `/api/cartoes/`, `/api/categorias/` | Cadastros básicos |
 | `/api/recorrencias/` | Ver, pausar (`ativa=false`) ou encerrar contas recorrentes |
 | `/api/emprestimos/`, `/api/pagamentos-emprestimo/` | Empréstimos (`direcao=devo` ou `devem`) e pagamentos ou devoluções |
-| `GET /api/cartoes/{id}/detalhe/` | Fatura aberta, limite, parcelas em andamento e próximas faturas |
+| `GET /api/cartoes/{id}/detalhe/` | Fatura aberta (ou `?fecha=AAAA-MM-DD`) com as compras, limite, parcelas em andamento e próximas faturas |
+| `GET /api/faturas/?mes=AAAA-MM` | Faturas que vencem no mês, uma linha por cartão com o total |
 | `POST /api/importar/fatura/` | Lê a fatura (`arquivo` e `cartao`, multipart) e devolve as linhas para revisar, sem gravar. Aceita CSV do Nubank, PDF do Itaú e CSV do Sicredi |
 | `POST /api/importar/fatura/confirmar/` | Grava as linhas escolhidas (`cartao`, `fecha` do ciclo, `itens`). Importar de novo o mesmo período substitui o que foi importado antes; o que foi lançado à mão fica. Uma parcela k de n cria também as seguintes |
 

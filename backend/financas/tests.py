@@ -177,3 +177,27 @@ class DetalheCartaoTests(ApiBase):
         outro = criar_usuario("b@exemplo.com")
         self.client.force_authenticate(outro)
         self.assertEqual(self.client.get(f"/api/cartoes/{self.cartao.id}/detalhe/").status_code, 404)
+
+
+class FaturasNaListaTests(ApiBase):
+    def test_lancamentos_sem_cartao_e_fatura_como_uma_linha(self):
+        self.lancar(descricao="Mercado", valor=5_000, cartao=self.cartao.id, data="2026-09-20")
+        self.lancar(descricao="Farmácia", valor=2_000, cartao=self.cartao.id, data="2026-10-02")
+        self.lancar(descricao="Luz", valor=9_000, conta=self.conta.id, data="2026-10-08")
+
+        r = self.client.get("/api/lancamentos/?mes=2026-10&sem_cartao=1")
+        self.assertEqual([l["descricao"] for l in r.data["results"]], ["Luz"])
+
+        # Fecha dia 3 e vence dia 10: compras de 04/09 a 03/10 vencem em 10/10.
+        f = self.client.get("/api/faturas/?mes=2026-10").data
+        self.assertEqual(len(f), 1)
+        self.assertEqual((f[0]["total"], f[0]["compras"], str(f[0]["vence"])), (7_000, 2, "2026-10-10"))
+
+    def test_detalhe_de_uma_fatura_passada_traz_as_compras(self):
+        self.lancar(descricao="Mercado", valor=5_000, cartao=self.cartao.id, data="2026-09-20")
+        r = self.client.get(f"/api/cartoes/{self.cartao.id}/detalhe/?fecha=2026-10-03")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["fatura"]["total"], 5_000)
+        self.assertEqual([c["descricao"] for c in r.data["compras"]], ["Mercado"])
+        self.assertEqual(str(r.data["fatura"]["anterior"]), "2026-09-03")
+        self.assertEqual(self.client.get(f"/api/cartoes/{self.cartao.id}/detalhe/?fecha=ontem").status_code, 400)

@@ -25,6 +25,7 @@ urlpatterns = [
     path("api/auth/token/renovar/", TokenRefreshView.as_view()),
     path("api/auth/eu/", EuView.as_view()),
     path("api/resumo/", fin.ResumoView.as_view()),
+    path("api/faturas/", fin.FaturasView.as_view()),
     path("api/importar/fatura/", imp.PreviaFaturaView.as_view()),
     path("api/importar/fatura/confirmar/", imp.ConfirmarFaturaView.as_view()),
     path("api/", include(router.urls)),

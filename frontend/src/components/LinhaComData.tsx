@@ -13,6 +13,7 @@ export default function LinhaComData({
   valorClasse = '',
   extra,
   para,
+  acao,
 }: {
   data: string
   titulo: string
@@ -23,6 +24,8 @@ export default function LinhaComData({
   valorClasse?: string
   extra?: ReactNode
   para?: string
+  /** Botão abaixo do texto, como "Marcar como pago". Fica fora do link. */
+  acao?: ReactNode
 }) {
   const d = lerData(data)
   const conteudo = (
@@ -42,12 +45,17 @@ export default function LinhaComData({
       </span>
     </>
   )
-  const classe = 'flex items-start gap-3 border-b border-linha py-3 text-tinta'
-  return para ? (
-    <Link to={para} className={`${classe} hover:bg-nevoa/50`}>
-      {conteudo}
-    </Link>
-  ) : (
-    <div className={classe}>{conteudo}</div>
+  const classe = 'flex items-start gap-3 py-3 text-tinta'
+  return (
+    <div className="border-b border-linha">
+      {para ? (
+        <Link to={para} className={`${classe} hover:bg-nevoa/50`}>
+          {conteudo}
+        </Link>
+      ) : (
+        <div className={classe}>{conteudo}</div>
+      )}
+      {acao && <div className="-mt-2 pb-2.5 pl-14">{acao}</div>}
+    </div>
   )
 }

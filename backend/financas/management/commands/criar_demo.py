@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, PagamentoEmprestimo, Recorrencia, criar_categorias_padrao
-from financas.servicos import criar_parcelas, gerar_ocorrencias, somar_meses
+from financas.servicos import criar_parcelas, gerar_ocorrencias, quitar_faturas_vencidas, somar_meses
 
 
 class Command(BaseCommand):
@@ -56,6 +56,12 @@ class Command(BaseCommand):
 
         criar_parcelas(dono=u, valor_total=450_000, parcelas=10, primeira=somar_meses(hoje, -2), descricao="Notebook", natureza="despesa", categoria=cat["Eletrônicos"], cartao=visa)
         criar_parcelas(dono=u, valor_total=35_960, parcelas=4, primeira=somar_meses(hoje, -1), descricao="Tênis", natureza="despesa", categoria=cat["Vestuário"], cartao=master)
+
+        # Faturas antigas pagas; uma conta esquecida e outra que vence hoje, para o Início mostrar.
+        for c in (visa, master):
+            quitar_faturas_vencidas(c, hoje)
+        Lancamento.objects.create(dono=u, descricao="Internet", valor=11_990, natureza="despesa", categoria=cat["Moradia"], conta=conta, data=date.fromordinal(hoje.toordinal() - 4), pago=False)
+        Lancamento.objects.create(dono=u, descricao="Conta de luz", valor=18_730, natureza="despesa", categoria=cat["Moradia"], conta=conta, data=hoje, pago=False)
 
         pessoal = Emprestimo.objects.create(dono=u, direcao="devo", nome="Empréstimo pessoal", instituicao="Banco do Brasil", valor_total=1_469_760, juros_mensal="2.1", parcela_valor=61_240, parcelas_total=24, data=somar_meses(mes, -8, 12), dia_vencimento=12)
         for i in range(8):

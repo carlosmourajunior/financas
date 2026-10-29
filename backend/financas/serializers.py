@@ -2,8 +2,8 @@ from datetime import date
 
 from rest_framework import serializers
 
-from .models import Cartao, Categoria, Conta, Emprestimo, Frequencia, Lancamento, PagamentoEmprestimo, Recorrencia
-from .servicos import criar_parcelas, gerar_ocorrencias
+from .models import Cartao, Categoria, Conta, Emprestimo, Frequencia, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
+from .servicos import criar_parcelas, fatura_que_fecha_em, gerar_ocorrencias, somar_meses
 
 
 class DoUsuarioSerializer(serializers.ModelSerializer):
@@ -153,6 +153,37 @@ class PagamentoEmprestimoSerializer(DoUsuarioSerializer):
     class Meta:
         model = PagamentoEmprestimo
         fields = ["id", "emprestimo", "valor", "data"]
+
+
+class PagamentoFaturaSerializer(DoUsuarioSerializer):
+    """Marca a fatura que fecha em `fecha` como paga. Sem valor, usa o total; sem data, hoje."""
+
+    campos_do_usuario = {"cartao": Cartao}
+    valor = serializers.IntegerField(min_value=1, required=False)
+    data = serializers.DateField(required=False)
+
+    class Meta:
+        model = PagamentoFatura
+        fields = ["id", "cartao", "fecha", "valor", "data"]
+        validators = []  # a fatura repetida tem mensagem própria abaixo
+
+    def validate(self, dados):
+        cartao, fecha = dados.get("cartao", getattr(self.instance, "cartao", None)), dados.get("fecha", getattr(self.instance, "fecha", None))
+        if fecha != somar_meses(fecha, 0, cartao.dia_fechamento):
+            raise serializers.ValidationError({"fecha": "Não é um dia de fechamento deste cartão."})
+        repetido = PagamentoFatura.objects.filter(cartao=cartao, fecha=fecha)
+        if self.instance:
+            repetido = repetido.exclude(pk=self.instance.pk)
+        if repetido.exists():
+            raise serializers.ValidationError("Esta fatura já está marcada como paga.")
+        if not self.instance:
+            dados.setdefault("data", date.today())
+            if "valor" not in dados:
+                total = fatura_que_fecha_em(cartao, fecha).total
+                if total <= 0:
+                    raise serializers.ValidationError("Esta fatura não tem valor a pagar.")
+                dados["valor"] = total
+        return dados
 
 
 class EmprestimoSerializer(serializers.ModelSerializer):

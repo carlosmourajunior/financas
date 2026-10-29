@@ -6,9 +6,11 @@ from rest_framework.test import APITestCase
 
 from .models import Cartao, Conta, Emprestimo, Lancamento, Recorrencia
 from .servicos import (
+    detalhe_cartao,
     fatura_aberta,
     fim_do_mes,
     gerar_ocorrencias,
+    quitar_faturas_vencidas,
     resumo,
     somar_meses,
 )
@@ -151,14 +153,70 @@ class ResumoTests(ApiBase):
         self.assertEqual(emp["devem_pessoas"], ["João"])
 
 
-class SaldoComFaturaTests(ApiBase):
-    def test_fatura_vencida_sai_do_saldo(self):
-        # Fatura fechada em 03/09 venceu em 10/09: já saiu da conta em 27/10.
+class PagamentoDeFaturaTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        # Fatura fechada em 03/09 venceu em 10/09; a aberta fecha em 03/11.
         Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Antiga", valor=5_000, natureza="despesa", data=date(2026, 9, 1))
-        # Fatura aberta (fecha 03/11): ainda não saiu.
         Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Nova", valor=7_000, natureza="despesa", data=date(2026, 10, 20))
+
+    def test_fatura_vencida_sem_pagamento_fica_vencida(self):
+        r = resumo(self.usuario, date(2026, 10, 27))
+        self.assertEqual(r["saldo_em_conta"], 100_000)
+        self.assertEqual([(v["tipo"], v["valor"], v["data"]) for v in r["vencidas"]], [("fatura", 5_000, date(2026, 9, 10))])
+        # Vencida de mês anterior também entra no que ainda vai sair.
+        self.assertEqual(r["a_vencer"], 5_000)
+
+    def test_pagar_fatura_tira_do_saldo_e_das_vencidas(self):
+        r = self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["valor"], 5_000)
         r = resumo(self.usuario, date(2026, 10, 27))
         self.assertEqual(r["saldo_em_conta"], 100_000 - 5_000)
+        self.assertEqual(r["vencidas"], [])
+        # A mesma fatura duas vezes, ou um dia que não é de fechamento, não.
+        self.assertEqual(self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json").status_code, 400)
+        self.assertEqual(self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-04"}, format="json").status_code, 400)
+
+    def test_desfazer_pagamento(self):
+        pid = self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json").data["id"]
+        self.assertEqual(self.client.delete(f"/api/pagamentos-fatura/{pid}/").status_code, 204)
+        self.assertEqual(len(resumo(self.usuario, date(2026, 10, 27))["vencidas"]), 1)
+
+    def test_nao_paga_fatura_de_cartao_alheio(self):
+        outro = criar_usuario("b@exemplo.com")
+        self.client.force_authenticate(outro)
+        r = self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_quitar_faturas_vencidas_registra_as_antigas(self):
+        self.assertEqual(quitar_faturas_vencidas(self.cartao, date(2026, 10, 27)), 1)
+        self.assertEqual(quitar_faturas_vencidas(self.cartao, date(2026, 10, 27)), 0)
+        self.assertEqual(resumo(self.usuario, date(2026, 10, 27))["saldo_em_conta"], 95_000)
+
+
+class VencidasTests(ApiBase):
+    def test_conta_nao_paga_vence_hoje_e_depois_fica_vencida(self):
+        luz = Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Luz", valor=9_000, natureza="despesa", data=date(2026, 10, 27), pago=False
+        )
+        r = resumo(self.usuario, date(2026, 10, 27))
+        self.assertEqual([v["id"] for v in r["vencem_hoje"]], [luz.id])
+        self.assertEqual(r["vencidas"], [])
+        r = resumo(self.usuario, date(2026, 10, 28))
+        self.assertEqual([v["nome"] for v in r["vencidas"]], ["Luz"])
+
+        # Marcar como pago pela API tira das vencidas e do saldo.
+        self.assertEqual(self.client.patch(f"/api/lancamentos/{luz.id}/", {"pago": True}, format="json").status_code, 200)
+        r = resumo(self.usuario, date(2026, 10, 28))
+        self.assertEqual(r["vencidas"], [])
+        self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000)
+
+    def test_receita_nao_e_conta_vencida(self):
+        Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Salário", valor=9_000, natureza="receita", data=date(2026, 10, 5), pago=False
+        )
+        self.assertEqual(resumo(self.usuario, date(2026, 10, 27))["vencidas"], [])
 
 
 class DetalheCartaoTests(ApiBase):
@@ -172,6 +230,20 @@ class DetalheCartaoTests(ApiBase):
         self.assertEqual(r.data["parcelas"][0]["atual"], 1)
         self.assertEqual(r.data["parcelas"][0]["total"], 4)
         self.assertEqual(r.data["disponivel"], 600_000 - 100_000)
+
+    def test_parcela_importada_no_meio_mostra_o_numero_da_fatura(self):
+        # Importada como 7 de 10: o app só tem da 7 à 10, mas está na 7, não na 1.
+        grupo = Lancamento.novo_grupo()
+        for k in range(7, 11):
+            Lancamento.objects.create(
+                dono=self.usuario, cartao=self.cartao, descricao="Comercial Tamo", valor=29_624, natureza="despesa",
+                data=somar_meses(date(2026, 10, 20), k - 7), tipo="parcelada", grupo=grupo, parcela_atual=k, parcela_total=10,
+            )
+        p = detalhe_cartao(self.cartao, date(2026, 10, 27))["parcelas"][0]
+        self.assertEqual((p["atual"], p["total"]), (7, 10))
+        # Um mês depois, a da fatura aberta é a 8.
+        p = detalhe_cartao(self.cartao, date(2026, 11, 27))["parcelas"][0]
+        self.assertEqual(p["atual"], 8)
 
     def test_detalhe_de_cartao_alheio_e_404(self):
         outro = criar_usuario("b@exemplo.com")

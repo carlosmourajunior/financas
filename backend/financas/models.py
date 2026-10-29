@@ -129,12 +129,15 @@ class Lancamento(DoUsuario):
     recorrencia = models.ForeignKey(Recorrencia, null=True, blank=True, on_delete=models.SET_NULL, related_name="ocorrencias")
     # Veio de uma fatura importada: importar de novo o mesmo período substitui estas linhas.
     importado = models.BooleanField(default=False)
+    # Parcela importada: identifica a compra em qualquer fatura (descrição, parcelas e mês da 1ª parcela).
+    chave = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
         ordering = ["-data", "-id"]
         indexes = [models.Index(fields=["dono", "data"])]
         constraints = [
             models.UniqueConstraint(fields=["recorrencia", "data"], name="ocorrencia_unica_por_data"),
+            models.UniqueConstraint(fields=["cartao", "chave", "parcela_atual"], condition=~models.Q(chave=""), name="parcela_unica_por_compra"),
         ]
 
     def __str__(self):
@@ -175,3 +178,19 @@ class PagamentoEmprestimo(DoUsuario):
 
     class Meta:
         ordering = ["data"]
+
+
+class PagamentoFatura(DoUsuario):
+    """Registro de que a fatura do cartão que fecha em `fecha` foi paga."""
+
+    cartao = models.ForeignKey(Cartao, on_delete=models.CASCADE, related_name="pagamentos")
+    fecha = models.DateField()
+    valor = models.BigIntegerField(validators=[MinValueValidator(1)])
+    data = models.DateField()
+
+    class Meta:
+        ordering = ["fecha"]
+        constraints = [models.UniqueConstraint(fields=["cartao", "fecha"], name="um_pagamento_por_fatura")]
+
+    def __str__(self):
+        return f"{self.cartao} {self.fecha}"

@@ -194,7 +194,7 @@ export default function Inicio() {
         </div>
 
         <div className="flex flex-col gap-8">
-          <Secao titulo="Faturas abertas">
+          <Secao titulo="Faturas do cartão">
             {r.faturas.length === 0 && (
               <LinhaLink to="/cartoes" titulo="Nenhum cartão cadastrado" sub="Cadastre para acompanhar as faturas" valor="" />
             )}
@@ -203,18 +203,29 @@ export default function Inicio() {
               return (
                 <LinhaLink
                   key={f.cartao}
-                  to="/cartoes"
+                  to={`/cartoes?cartao=${f.cartao}`}
                   titulo={c ? nomeCartao(c) : f.nome}
-                  sub={`fecha em ${porExtenso(f.fecha)}`}
+                  sub={f.aberta ? `aberta, fecha em ${porExtenso(f.fecha)}` : `fechada, vence em ${porExtenso(f.vence)}`}
                   valor={m(f.total)}
                 />
               )
             })}
           </Secao>
-          <Secao titulo={`${maiuscula(proximoMes)} já tem compromisso`}>
+          <Secao
+            titulo={`${maiuscula(proximoMes)} já tem compromisso`}
+            acao={<LinkAcao to={`/lancamentos?mes=${isoMes(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1))}`}>Ver</LinkAcao>}
+          >
             <p className="text-[15px] leading-relaxed text-suave">
               Parcelas e contas fixas somam <strong className="text-tinta">{m(r.compromisso_proximo_mes)}</strong>
-              {r.entrou > 0 ? `, cerca de ${pct(r.compromisso_proximo_mes, r.entrou)} do que entrou este mês.` : '.'}
+              {r.entradas_proximo_mes > 0 ? (
+                <>
+                  , e estão previstos <strong className="text-musgo">{m(r.entradas_proximo_mes)}</strong> de recebimentos.
+                </>
+              ) : r.entrou > 0 ? (
+                `, cerca de ${pct(r.compromisso_proximo_mes, r.entrou)} do que entrou este mês.`
+              ) : (
+                '.'
+              )}
             </p>
           </Secao>
         </div>

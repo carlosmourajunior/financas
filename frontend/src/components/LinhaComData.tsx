@@ -17,7 +17,7 @@ export default function LinhaComData({
 }: {
   data: string
   titulo: string
-  detalhe?: string
+  detalhe?: ReactNode
   situacao?: string
   alerta?: boolean
   valor: string

@@ -98,10 +98,10 @@ def gerar_ocorrencias(dono, ate: date) -> int:
     return criadas
 
 
-def projetar_recorrencias(dono, inicio: date, fim: date) -> int:
-    """Soma das despesas recorrentes que cairiam no período, sem gravar nada."""
+def projetar_recorrencias(dono, inicio: date, fim: date, natureza: str = Natureza.DESPESA) -> int:
+    """Soma das recorrências (despesas, ou receitas) que cairiam no período, sem gravar nada."""
     total = 0
-    for rec in Recorrencia.objects.filter(dono=dono, ativa=True, natureza=Natureza.DESPESA):
+    for rec in Recorrencia.objects.filter(dono=dono, ativa=True, natureza=natureza):
         data = rec.inicio
         while data <= fim and (rec.fim is None or data <= rec.fim):
             if data >= inicio:
@@ -160,6 +160,15 @@ def fatura_aberta(cartao: Cartao, hoje: date) -> Fatura:
     return fatura_que_fecha_em(cartao, fechamento)
 
 
+def fatura_atual(cartao: Cartao, hoje: date) -> Fatura:
+    """A fatura para olhar agora: a que já fechou e ainda não foi paga; paga (ou vazia), a aberta."""
+    aberta = fatura_aberta(cartao, hoje)
+    fechada = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, cartao.dia_fechamento))
+    if fechada.total > 0 and not PagamentoFatura.objects.filter(cartao=cartao, fecha=fechada.fecha).exists():
+        return fechada
+    return aberta
+
+
 def faturas_vencendo(cartao: Cartao, inicio: date, fim: date) -> list[Fatura]:
     """Faturas (fechadas ou não) cujo vencimento cai no período."""
     aberta = fatura_aberta(cartao, inicio)
@@ -174,9 +183,9 @@ def limite_usado(cartao: Cartao, hoje: date) -> int:
 
 
 def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | None = None) -> dict:
-    """Uma fatura do cartão (a aberta, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
+    """Uma fatura do cartão (a atual, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
     aberta = fatura_aberta(cartao, hoje)
-    escolhida = fatura_que_fecha_em(cartao, fecha) if fecha else aberta
+    escolhida = fatura_que_fecha_em(cartao, fecha) if fecha else fatura_atual(cartao, hoje)
     proximas = []
     f_proxima = aberta.fecha
     for _ in range(meses):
@@ -225,6 +234,7 @@ def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | Non
                 "valor": l.valor,
                 "natureza": l.natureza,
                 "categoria": l.categoria.nome if l.categoria else None,
+                "categoria_id": l.categoria_id,
                 "parcela_atual": l.parcela_atual,
                 "parcela_total": l.parcela_total,
             }
@@ -378,10 +388,14 @@ def resumo(dono, hoje: date) -> dict:
     prox_fim = fim_do_mes(prox_inicio)
     compromisso = _soma(lanc.filter(natureza=Natureza.DESPESA, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim))
     compromisso += projetar_recorrencias(dono, prox_inicio, prox_fim)
+    entradas_previstas = _soma(
+        lanc.filter(natureza=Natureza.RECEITA, cartao__isnull=True, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim)
+    ) + projetar_recorrencias(dono, prox_inicio, prox_fim, Natureza.RECEITA)
 
+    # Por cartão, a fatura fechada que falta pagar; sem ela, a aberta.
     faturas = []
     for c in cartoes:
-        f = fatura_aberta(c, hoje)
+        f = fatura_atual(c, hoje)
         faturas.append(
             {
                 "cartao": c.id,
@@ -389,6 +403,7 @@ def resumo(dono, hoje: date) -> dict:
                 "total": f.total,
                 "fecha": f.fecha,
                 "vence": f.vence,
+                "aberta": f.fecha >= hoje,
                 "limite": c.limite,
                 "disponivel": c.limite - limite_usado(c, hoje),
             }
@@ -415,6 +430,7 @@ def resumo(dono, hoje: date) -> dict:
         "categorias": [{"nome": c["categoria__nome"] or "Sem categoria", "valor": c["valor"]} for c in categorias],
         "faturas": faturas,
         "compromisso_proximo_mes": compromisso,
+        "entradas_proximo_mes": entradas_previstas,
         "emprestimos": {
             "devo_total": sum(saldo_emp(e) for e in devo),
             "devo_por_mes": sum(e.parcela_valor or 0 for e in devo if saldo_emp(e) > 0),

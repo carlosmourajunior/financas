@@ -82,6 +82,21 @@ class LancamentoViewSet(DoUsuarioViewSet):
         # O serializer cuida do dono porque pode criar vários registros.
         serializer.save()
 
+    def perform_destroy(self, instance):
+        """`?seguintes=1` apaga também as próximas parcelas ou ocorrências; a recorrência para de gerar."""
+        if self.request.query_params.get("seguintes") not in ("1", "true"):
+            instance.delete()
+            return
+        if instance.recorrencia_id:
+            rec = instance.recorrencia
+            rec.ativa = False
+            rec.save(update_fields=["ativa", "atualizado_em"])
+            rec.ocorrencias.filter(data__gte=instance.data).delete()
+        elif instance.grupo:
+            Lancamento.objects.filter(dono=instance.dono, grupo=instance.grupo, data__gte=instance.data).delete()
+        else:
+            instance.delete()
+
     def get_queryset(self):
         qs = super().get_queryset().select_related("categoria", "conta", "cartao")
         p = self.request.query_params

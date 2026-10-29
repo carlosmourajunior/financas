@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
-from .models import Cartao, Conta, Emprestimo, Lancamento, Recorrencia
+from .models import Cartao, Conta, Emprestimo, Lancamento, PagamentoFatura, Recorrencia
 from .servicos import (
     detalhe_cartao,
     fatura_aberta,
@@ -193,6 +193,52 @@ class PagamentoDeFaturaTests(ApiBase):
         self.assertEqual(quitar_faturas_vencidas(self.cartao, date(2026, 10, 27)), 1)
         self.assertEqual(quitar_faturas_vencidas(self.cartao, date(2026, 10, 27)), 0)
         self.assertEqual(resumo(self.usuario, date(2026, 10, 27))["saldo_em_conta"], 95_000)
+
+
+class FaturaAtualTests(ApiBase):
+    def test_abre_na_fechada_sem_pagamento_e_depois_na_aberta(self):
+        # Visa fecha dia 3 e vence dia 10. Em 05/10 a de 03/10 já fechou e vence em 10/10.
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Mercado", valor=5_000, natureza="despesa", data=date(2026, 9, 20))
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Posto", valor=7_000, natureza="despesa", data=date(2026, 10, 4))
+        hoje = date(2026, 10, 5)
+        d = detalhe_cartao(self.cartao, hoje)
+        self.assertEqual((d["fatura"]["fecha"], d["fatura"]["total"], d["fatura"]["aberta"]), (date(2026, 10, 3), 5_000, False))
+        self.assertEqual(resumo(self.usuario, hoje)["faturas"][0]["total"], 5_000)
+
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 10, 3), valor=5_000, data=hoje)
+        d = detalhe_cartao(self.cartao, hoje)
+        self.assertEqual((d["fatura"]["fecha"], d["fatura"]["total"], d["fatura"]["aberta"]), (date(2026, 11, 3), 7_000, True))
+        self.assertEqual(resumo(self.usuario, hoje)["faturas"][0]["total"], 7_000)
+
+
+class ExcluirTests(ApiBase):
+    def test_excluir_um_e_os_seguintes_da_recorrencia(self):
+        self.lancar(descricao="Salário", valor=500_000, natureza="receita", tipo="recorrente", conta=self.conta.id, data="2026-10-05")
+        self.client.get("/api/lancamentos/?mes=2026-12")  # gera até dezembro
+        nov = Lancamento.objects.get(descricao="Salário", data=date(2026, 11, 5))
+        # Só este: o de novembro some e não volta.
+        self.assertEqual(self.client.delete(f"/api/lancamentos/{nov.id}/").status_code, 204)
+        self.assertEqual(self.client.get("/api/lancamentos/?mes=2026-11").data["results"], [])
+        # Este e os próximos: a partir de dezembro, para de gerar.
+        dez = Lancamento.objects.get(descricao="Salário", data=date(2026, 12, 5))
+        self.assertEqual(self.client.delete(f"/api/lancamentos/{dez.id}/?seguintes=1").status_code, 204)
+        self.assertEqual(self.client.get("/api/lancamentos/?mes=2027-02").data["results"], [])
+        self.assertEqual(len(self.client.get("/api/lancamentos/?mes=2026-10").data["results"]), 1)
+
+    def test_resumo_preve_recebimentos_do_proximo_mes(self):
+        self.lancar(descricao="Salário", valor=500_000, natureza="receita", tipo="recorrente", conta=self.conta.id, data="2026-10-05")
+        self.assertEqual(resumo(self.usuario, date(2026, 10, 27))["entradas_proximo_mes"], 500_000)
+
+    def test_excluir_parcelas_seguintes(self):
+        self.lancar(descricao="TV", valor=40_000, tipo="parcelada", parcelas=4, conta=self.conta.id, data="2026-10-10")
+        terceira = Lancamento.objects.get(descricao="TV", parcela_atual=3)
+        self.client.delete(f"/api/lancamentos/{terceira.id}/?seguintes=1")
+        self.assertEqual(sorted(Lancamento.objects.filter(descricao="TV").values_list("parcela_atual", flat=True)), [1, 2])
+
+    def test_nao_exclui_de_outro_usuario(self):
+        l = self.lancar(descricao="Luz", conta=self.conta.id).data
+        self.client.force_authenticate(criar_usuario("b@exemplo.com"))
+        self.assertEqual(self.client.delete(f"/api/lancamentos/{l['id']}/").status_code, 404)
 
 
 class VencidasTests(ApiBase):

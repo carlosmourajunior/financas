@@ -5,11 +5,12 @@ import { FormCartao } from '../components/Formularios'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Abas, Barra, Secao, Segmentos, Titulo, botaoSecundario } from '../components/ui'
-import type { Pagina } from '../lib/api'
+import { api, type Pagina } from '../lib/api'
+import { useCadastros } from '../lib/cadastros'
 import { MESES, isoData, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda, pct } from '../lib/format'
 import { desfazerPagamentoFatura, pagarFatura } from '../lib/pagar'
-import type { Cartao, DetalheCartao } from '../lib/tipos'
+import type { Cartao, Categoria, CompraNoCartao, DetalheCartao } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
 function mesAno(iso: string) {
@@ -25,6 +26,8 @@ export default function Cartoes() {
   const sel = busca.get('cartao') ?? ''
   const fecha = busca.get('fecha')
   const [novo, setNovo] = useState(false)
+  const [soSemCategoria, setSoSemCategoria] = useState(false)
+  const categorias = useCadastros().categorias.filter((x) => x.natureza === 'despesa')
   const c = cartoes.find((x) => String(x.id) === sel) ?? cartoes[0]
   const detalhe = useApi<DetalheCartao>(c ? `/cartoes/${c.id}/detalhe/${fecha ? `?fecha=${fecha}` : ''}` : null)
   const setSel = (id: string) => setBusca({ cartao: id }, { replace: true })
@@ -151,19 +154,42 @@ export default function Cartoes() {
           </section>
 
           <div id="compras" className="scroll-mt-4">
-            <Secao titulo={`Compras desta fatura (${d.compras.length})`}>
+            <Secao
+              titulo={`Compras desta fatura (${d.compras.length})`}
+              acao={
+                semCategoria(d.compras) > 0 && (
+                  <button
+                    aria-pressed={soSemCategoria}
+                    onClick={() => setSoSemCategoria(!soSemCategoria)}
+                    className={`min-h-9 shrink-0 cursor-pointer whitespace-nowrap rounded-[10px] border px-3 text-sm font-bold ${
+                      soSemCategoria ? 'border-tinta bg-tinta text-white' : 'border-borda bg-white'
+                    }`}
+                  >
+                    Sem categoria ({semCategoria(d.compras)})
+                  </button>
+                )
+              }
+            >
               {d.compras.length === 0 && <p className="py-2.5 text-[15px] text-suave">Nenhuma compra nesta fatura.</p>}
-              {d.compras.map((l) => (
-                <LinhaComData
-                  key={l.id}
-                  data={l.data}
-                  titulo={l.descricao}
-                  detalhe={l.natureza === 'receita' ? 'Crédito na fatura' : (l.categoria ?? 'Sem categoria')}
-                  valor={l.natureza === 'receita' ? `- ${moeda(l.valor)}` : moeda(l.valor)}
-                  valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
-                  extra={l.parcela_total && <span className="text-sm text-suave">parcela {l.parcela_atual} de {l.parcela_total}</span>}
-                />
-              ))}
+              {d.compras
+                .filter((l) => !soSemCategoria || (l.natureza === 'despesa' && !l.categoria_id))
+                .map((l) => (
+                  <LinhaComData
+                    key={l.id}
+                    data={l.data}
+                    titulo={l.descricao}
+                    detalhe={
+                      l.natureza === 'receita' ? (
+                        'Crédito na fatura'
+                      ) : (
+                        <EscolherCategoria compra={l} compras={d.compras} categorias={categorias} aoMudar={detalhe.recarregar} />
+                      )
+                    }
+                    valor={l.natureza === 'receita' ? `- ${moeda(l.valor)}` : moeda(l.valor)}
+                    valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
+                    extra={l.parcela_total && <span className="text-sm text-suave">parcela {l.parcela_atual} de {l.parcela_total}</span>}
+                  />
+                ))}
             </Secao>
           </div>
 
@@ -195,5 +221,64 @@ export default function Cartoes() {
         </div>
       )}
     </div>
+  )
+}
+
+function semCategoria(compras: CompraNoCartao[]) {
+  return compras.filter((l) => l.natureza === 'despesa' && !l.categoria_id).length
+}
+
+/** Categoria da compra, editável na hora. Sem categoria, as outras da mesma loja nesta fatura recebem a mesma. */
+function EscolherCategoria({
+  compra,
+  compras,
+  categorias,
+  aoMudar,
+}: {
+  compra: CompraNoCartao
+  compras: CompraNoCartao[]
+  categorias: Categoria[]
+  aoMudar: () => void
+}) {
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  async function mudar(valor: string) {
+    const categoria = valor ? Number(valor) : null
+    const iguais = compra.categoria_id
+      ? [compra]
+      : compras.filter((l) => l.natureza === 'despesa' && !l.categoria_id && l.descricao === compra.descricao)
+    setErro(null)
+    setSalvando(true)
+    try {
+      await Promise.all(iguais.map((l) => api(`/lancamentos/${l.id}/`, { method: 'PATCH', body: { categoria } })))
+      aoMudar()
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível salvar.')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <select
+        aria-label={`Categoria de ${compra.descricao}`}
+        value={compra.categoria_id ?? ''}
+        disabled={salvando}
+        onChange={(e) => mudar(e.target.value)}
+        className={`-mx-1 -my-1 min-h-8 cursor-pointer rounded-md bg-transparent px-1 py-1 text-sm hover:bg-nevoa disabled:opacity-60 ${
+          compra.categoria_id ? 'text-suave' : 'font-semibold text-ambar-texto'
+        }`}
+      >
+        <option value="">Sem categoria</option>
+        {categorias.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.nome}
+          </option>
+        ))}
+      </select>
+      {erro && <span className="text-sm font-semibold text-ambar-texto">{erro}</span>}
+    </span>
   )
 }

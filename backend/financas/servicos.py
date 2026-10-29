@@ -185,6 +185,9 @@ def limite_usado(cartao: Cartao, hoje: date) -> int:
 def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | None = None) -> dict:
     """Uma fatura do cartão (a atual, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
     aberta = fatura_aberta(cartao, hoje)
+    # Assinaturas no cartão entram também nas próximas faturas e na que foi pedida.
+    ate = somar_meses(aberta.fecha, meses, cartao.dia_fechamento)
+    gerar_ocorrencias(cartao.dono, max(ate, fecha) if fecha else ate)
     escolhida = fatura_que_fecha_em(cartao, fecha) if fecha else fatura_atual(cartao, hoje)
     proximas = []
     f_proxima = aberta.fecha

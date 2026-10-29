@@ -28,6 +28,7 @@ export default function NovoLancamento() {
   const [parcelas, setParcelas] = useState(2)
   const [frequencia, setFrequencia] = useState<Frequencia>('mensal')
   const [fim, setFim] = useState('')
+  const [temFim, setTemFim] = useState(false)
   const [descricao, setDescricao] = useState('')
   const [categoria, setCategoria] = useState('')
   const [data, setData] = useState(() => isoData(new Date()))
@@ -46,6 +47,14 @@ export default function NovoLancamento() {
   // Compra no cartão é paga na fatura. Parcelas e recorrentes seguem a data: as que já passaram contam como pagas.
   const perguntaPago = tipo === 'unica' && meioEscolhido.startsWith('conta')
 
+  // Diz em palavras até quando a recorrência vai, para não terminar sem querer.
+  const vezes = temFim && fim && frequencia === 'mensal' ? contarMeses(data, fim) : null
+  const resumoRecorrencia = !temFim || !fim
+    ? 'Sem data final: entra em todos os meses até você excluir'
+    : vezes !== null
+      ? `Entra ${vezes === 1 ? 'só uma vez' : `${vezes} vezes`}, de ${mesDe(data)} a ${mesDe(fim)}`
+      : `Entra até ${mesDe(fim)}`
+
   const { erro, enviando, enviar } = useEnvio(async () => {
     if (total <= 0) throw new Error('Informe um valor maior que zero.')
     const [qual, id] = meioEscolhido.split(':')
@@ -62,7 +71,7 @@ export default function NovoLancamento() {
         cartao: qual === 'cartao' ? Number(id) : null,
         ...(perguntaPago ? { pago } : {}),
         ...(tipo === 'parcelada' ? { parcelas } : {}),
-        ...(tipo === 'recorrente' ? { frequencia, fim: fim || null } : {}),
+        ...(tipo === 'recorrente' ? { frequencia, fim: temFim && fim ? fim : null } : {}),
       },
     })
     navigate('/lancamentos')
@@ -150,21 +159,31 @@ export default function NovoLancamento() {
 
         {tipo === 'recorrente' && (
           <div className="flex flex-col gap-2.5 rounded-[14px] bg-nevoa p-4">
-            <div className="grid grid-cols-2 gap-3">
-              <Campo label="Repete">
-                <select value={frequencia} onChange={(e) => setFrequencia(e.target.value as Frequencia)} className={`${campo} min-h-12`}>
-                  <option value="mensal">Todo mês</option>
-                  <option value="semanal">Toda semana</option>
-                  <option value="anual">Todo ano</option>
-                </select>
+            <Campo label="Repete">
+              <select value={frequencia} onChange={(e) => setFrequencia(e.target.value as Frequencia)} className={`${campo} min-h-12`}>
+                <option value="mensal">Todo mês</option>
+                <option value="semanal">Toda semana</option>
+                <option value="anual">Todo ano</option>
+              </select>
+            </Campo>
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 text-base font-semibold">
+              <input
+                type="checkbox"
+                checked={temFim}
+                onChange={(e) => {
+                  setTemFim(e.target.checked)
+                  if (!e.target.checked) setFim('')
+                }}
+                className="size-5 shrink-0 cursor-pointer accent-tinta"
+              />
+              Tem data para terminar
+            </label>
+            {temFim && (
+              <Campo label="Última vez em">
+                <input type="date" required value={fim} min={data} onChange={(e) => setFim(e.target.value)} className={`${campo} min-h-12`} />
               </Campo>
-              <Campo label="Até">
-                <input type="date" value={fim} min={data} onChange={(e) => setFim(e.target.value)} className={`${campo} min-h-12`} />
-              </Campo>
-            </div>
-            <p className="text-[15px]">
-              {fim ? 'Entra nas contas até a data escolhida' : 'Sem data final, entra nas contas até você encerrar'}
-            </p>
+            )}
+            <p className="text-[15px]">{resumoRecorrencia}</p>
           </div>
         )}
 
@@ -228,4 +247,17 @@ export default function NovoLancamento() {
       </div>
     </form>
   )
+}
+
+function mesDe(iso: string) {
+  const d = lerData(iso)
+  return `${MESES[d.getMonth()]} de ${d.getFullYear()}`
+}
+
+/** Quantas vezes uma recorrência mensal cai entre o início e a data final. */
+function contarMeses(inicio: string, fim: string) {
+  const a = lerData(inicio)
+  const b = lerData(fim)
+  const meses = (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth()
+  return Math.max(0, meses + (b.getDate() >= a.getDate() ? 1 : 0))
 }

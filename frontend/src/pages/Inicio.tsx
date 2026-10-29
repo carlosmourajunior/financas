@@ -179,19 +179,17 @@ export default function Inicio() {
       <div className="grid gap-8 px-5 pt-5 lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:gap-10 lg:px-0 lg:pt-0">
         <div className="flex flex-col gap-8">
           <Secao titulo={`${maiuscula(MESES[hoje.getMonth()])} até agora`}>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Numero rotulo="Entrou" valor={m(r.entrou)} classe="text-musgo" />
-              <Numero rotulo="Gastou" valor={m(r.saiu)} />
-              <Numero rotulo="Sai da conta" valor={m(r.sai_da_conta)} />
-            </div>
-            <ul className="flex flex-col gap-1 pt-2.5 text-sm text-suave">
-              <li>
-                <strong className="text-tinta">Gastou</strong>: as contas do mês e, de cada cartão, a fatura que fecha em {MESES[hoje.getMonth()]}.
-              </li>
-              <li>
-                <strong className="text-tinta">Sai da conta</strong>: as contas do mês e as faturas que vencem em {MESES[hoje.getMonth()]}.
-              </li>
-            </ul>
+            <LinhaResumo rotulo="Entrou" sub="Recebimentos na conta" valor={m(r.entrou)} classe="text-musgo" />
+            <LinhaResumo rotulo="Gastou" sub={`Contas e faturas que fecham em ${MESES[hoje.getMonth()]}`} valor={m(r.saiu)} />
+            <LinhaResumo
+              rotulo="Sai da conta"
+              sub={
+                r.fechadas_a_pagar.length
+                  ? r.fechadas_a_pagar.map((f) => `${f.nome} (${m(f.valor)}) sai em ${diaMes(f.vence)}`).join(', ')
+                  : `Contas e faturas que vencem em ${MESES[hoje.getMonth()]}`
+              }
+              valor={m(r.sai_da_conta)}
+            />
             <p className="pt-3 text-[15px] text-suave lg:hidden">
               Em conta agora: <strong className="text-tinta">{m(r.saldo_em_conta)}</strong>
             </p>
@@ -249,7 +247,7 @@ export default function Inicio() {
             acao={<LinkAcao to={`/lancamentos?mes=${isoMes(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1))}`}>Ver</LinkAcao>}
           >
             <p className="text-[15px] leading-relaxed text-suave">
-              Parcelas e contas fixas somam <strong className="text-tinta">{m(r.compromisso_proximo_mes)}</strong>
+              Faturas e contas que vencem em {proximoMes} somam <strong className="text-tinta">{m(r.compromisso_proximo_mes)}</strong>
               {r.entradas_proximo_mes > 0 ? (
                 <>
                   , e estão previstos <strong className="text-musgo">{m(r.entradas_proximo_mes)}</strong> de recebimentos.
@@ -389,11 +387,14 @@ function BotaoOlho({ oculto, onClick }: { oculto: boolean; onClick: () => void }
   )
 }
 
-function Numero({ rotulo, valor, classe = '' }: { rotulo: string; valor: string; classe?: string }) {
+function LinhaResumo({ rotulo, sub, valor, classe = '' }: { rotulo: string; sub: string; valor: string; classe?: string }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-sm text-suave">{rotulo}</span>
-      <span className={`font-display text-2xl font-bold tabular-nums ${classe}`}>{valor}</span>
+    <div className="flex items-center justify-between gap-4 border-b border-linha py-3">
+      <span className="flex min-w-0 flex-col">
+        <span className="text-base font-bold">{rotulo}</span>
+        <span className="text-sm text-suave">{sub}</span>
+      </span>
+      <span className={`shrink-0 font-display text-[22px] font-bold tabular-nums ${classe}`}>{valor}</span>
     </div>
   )
 }

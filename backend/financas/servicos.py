@@ -99,9 +99,9 @@ def gerar_ocorrencias(dono, ate: date) -> int:
 
 
 def projetar_recorrencias(dono, inicio: date, fim: date, natureza: str = Natureza.DESPESA) -> int:
-    """Soma das recorrências (despesas, ou receitas) que cairiam no período, sem gravar nada."""
+    """Soma das recorrências fora do cartão (despesas, ou receitas) que cairiam no período, sem gravar nada."""
     total = 0
-    for rec in Recorrencia.objects.filter(dono=dono, ativa=True, natureza=natureza):
+    for rec in Recorrencia.objects.filter(dono=dono, ativa=True, natureza=natureza, cartao__isnull=True):
         data = rec.inicio
         while data <= fim and (rec.fim is None or data <= rec.fim):
             if data >= inicio:
@@ -407,8 +407,12 @@ def resumo(dono, hoje: date) -> dict:
 
     prox_inicio = fim + timedelta(days=1)
     prox_fim = fim_do_mes(prox_inicio)
-    compromisso = _soma(lanc.filter(natureza=Natureza.DESPESA, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim))
+    # O que sai da conta no mês que vem: contas fora do cartão e as faturas que vencem nele.
+    compromisso = _soma(
+        lanc.filter(natureza=Natureza.DESPESA, cartao__isnull=True, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim)
+    )
     compromisso += projetar_recorrencias(dono, prox_inicio, prox_fim)
+    compromisso += sum(f.total for c in cartoes for f in faturas_vencendo(c, prox_inicio, prox_fim))
     entradas_previstas = _soma(
         lanc.filter(natureza=Natureza.RECEITA, cartao__isnull=True, recorrencia__isnull=True, data__gte=prox_inicio, data__lte=prox_fim)
     ) + projetar_recorrencias(dono, prox_inicio, prox_fim, Natureza.RECEITA)

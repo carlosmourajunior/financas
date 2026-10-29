@@ -367,10 +367,12 @@ def resumo(dono, hoje: date) -> dict:
         {"dia": l.data.day, "nome": l.descricao, "valor": l.valor, "paga": l.pago}
         for l in lanc.filter(conta__isnull=False, natureza=Natureza.DESPESA, data__gte=inicio, data__lte=fim).order_by("data")
     ]
+    faturas_que_vencem = 0
     for c in cartoes:
         pagos = pagamentos_por_fecha(c)
         for f in faturas_vencendo(c, inicio, fim):
             if f.total:
+                faturas_que_vencem += f.total
                 contas_mes.append({"dia": f.vence.day, "nome": f"Fatura {c}", "valor": f.total, "paga": f.fecha in pagos})
     contas_mes.sort(key=lambda c: c["dia"])
 
@@ -378,6 +380,13 @@ def resumo(dono, hoje: date) -> dict:
     vencidas = [p for p in pendentes if p["data"] < hoje]
     # Inclui o que já venceu e não foi pago, deste mês e dos anteriores: ainda vai sair da conta.
     a_vencer = sum(c["valor"] for c in contas_mes if not c["paga"]) + sum(p["valor"] for p in vencidas if p["data"] < inicio)
+    # Fatura que já fechou e só vence no mês que vem: o valor já está definido, então também sai do que dá para gastar.
+    fechadas_depois = []
+    for c in cartoes:
+        f = fatura_atual(c, hoje)
+        if f.fecha < hoje and f.vence > fim and f.total > 0:
+            fechadas_depois.append({"cartao": c.id, "nome": f"Fatura {c}", "valor": f.total, "vence": f.vence})
+    a_vencer += sum(f["valor"] for f in fechadas_depois)
 
     do_mes = lanc.filter(data__gte=inicio, data__lte=fim)
     # Gasto do mês: o que é pago fora do cartão com data no mês, mais cada fatura inteira no mês em que fecha.
@@ -388,6 +397,7 @@ def resumo(dono, hoje: date) -> dict:
         no_mes |= Q(cartao=c, data__gte=f.abre, data__lte=f.fecha)
         faturas_que_fecham += f.total
     gastos = lanc.filter(no_mes, natureza=Natureza.DESPESA)
+    creditos = _soma(lanc.filter(no_mes, natureza=Natureza.RECEITA, cartao__isnull=False))
     categorias = (
         gastos
         .values("categoria__nome")
@@ -434,12 +444,18 @@ def resumo(dono, hoje: date) -> dict:
         "livre_para_gastar": saldo - a_vencer,
         "contas_do_mes": contas_mes,
         "vencidas": vencidas,
+        "fechadas_a_pagar": fechadas_depois,
         "vencem_hoje": [p for p in pendentes if p["data"] == hoje],
         # Estorno no cartão abate a fatura, não é dinheiro que entrou.
         "entrou": _soma(do_mes.filter(natureza=Natureza.RECEITA, cartao__isnull=True)),
+        # Gasto do mês: a fatura entra no mês em que fecha.
         "saiu": _soma(gastos.filter(cartao__isnull=True)) + faturas_que_fecham,
+        # Dinheiro que sai da conta: a fatura entra no mês em que vence.
+        "sai_da_conta": _soma(gastos.filter(cartao__isnull=True)) + faturas_que_vencem,
         # Parcelas de compras de meses anteriores: entram no gasto, mas não são compra nova.
         "parcelas_anteriores": _soma(gastos.filter(parcela_atual__gt=1)),
+        # Estornos e créditos nas faturas do mês: abatem o gasto, fora das categorias.
+        "creditos_cartao": creditos,
         "categorias": [{"nome": c["categoria__nome"] or "Sem categoria", "valor": c["valor"]} for c in categorias],
         "faturas": faturas,
         "compromisso_proximo_mes": compromisso,

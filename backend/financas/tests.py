@@ -291,6 +291,11 @@ class DetalheCartaoTests(ApiBase):
         p = detalhe_cartao(self.cartao, date(2026, 11, 27))["parcelas"][0]
         self.assertEqual(p["atual"], 8)
 
+    def test_assinatura_no_cartao_entra_nas_proximas_faturas(self):
+        self.lancar(descricao="Streaming", valor=4_000, tipo="recorrente", cartao=self.cartao.id, data=str(date.today()))
+        d = detalhe_cartao(self.cartao, date.today())
+        self.assertEqual([p["total"] for p in d["proximas"]], [4_000, 4_000, 4_000])
+
     def test_detalhe_de_cartao_alheio_e_404(self):
         outro = criar_usuario("b@exemplo.com")
         self.client.force_authenticate(outro)

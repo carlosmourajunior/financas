@@ -67,6 +67,12 @@ export interface Resumo {
   parcelas_anteriores: number
   creditos_cartao: number
   sai_da_conta: number
+  gastou_detalhe: {
+    cartoes: { cartao: number; nome: string; valor: number; fecha: string; vence: string }[]
+    recorrentes: number
+    parceladas: number
+    avulsas: number
+  }
   fechadas_a_pagar: { cartao: number; nome: string; valor: number; vence: string }[]
   faturas: { cartao: number; nome: string; total: number; fecha: string; vence: string; aberta: boolean; limite: number; disponivel: number }[]
   compromisso_proximo_mes: number

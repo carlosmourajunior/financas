@@ -98,3 +98,34 @@ def data_sem_ano(dia_mes: str, referencia: date) -> date:
 def data_da_parcela(compra: date, parcela_atual: int | None) -> date:
     """Bancos mostram a data da compra; a parcela k cai k-1 meses depois."""
     return somar_meses(compra, (parcela_atual or 1) - 1) if parcela_atual else compra
+
+
+@dataclass
+class Movimento:
+    """Uma linha do extrato da conta."""
+
+    data: date
+    descricao: str  # quem recebeu ou pagou, ou o nome do lançamento
+    origem: str  # o lançamento como o banco escreve (Pix - Enviado, Pagamento de Boleto…)
+    valor: int  # centavos; positivo entra, negativo sai
+    detalhes: str = ""
+    documento: str = ""
+    parcela_atual: int | None = None
+    parcela_total: int | None = None
+    aplicacao: bool = False  # aplicação ou resgate automático da própria conta
+
+
+@dataclass
+class ExtratoLido:
+    banco: str
+    itens: list[Movimento] = field(default_factory=list)
+    saldo_anterior: int | None = None
+    saldo_final: int | None = None
+    data_final: date | None = None
+
+    @property
+    def conferido(self) -> bool | None:
+        """True quando saldo anterior + movimentos dá o saldo final do arquivo."""
+        if self.saldo_anterior is None or self.saldo_final is None:
+            return None
+        return self.saldo_anterior + sum(i.valor for i in self.itens) == self.saldo_final

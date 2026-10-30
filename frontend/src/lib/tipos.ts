@@ -174,3 +174,44 @@ export interface PreviaFatura {
   ja_importados: number
   itens: ItemImportado[]
 }
+
+export type ClasseMovimento = 'despesa' | 'receita' | 'transferencia' | 'fatura' | 'emprestimo'
+
+export interface MovimentoImportado {
+  data: string
+  descricao: string
+  origem: string
+  valor: number
+  natureza: Natureza
+  classe: ClasseMovimento
+  tipo: Tipo
+  parcela_atual: number | null
+  parcela_total: number | null
+  categoria: number | null
+  cartao: number | null
+  emprestimo: number | null
+  lancamento: number | null
+  chave: string
+  importar: boolean
+  aviso: string
+}
+
+export interface PreviaExtrato {
+  banco: string
+  saldo_anterior: number | null
+  saldo_final: number | null
+  data_final: string | null
+  conferido: boolean | null
+  entradas: number
+  saidas: number
+  itens: MovimentoImportado[]
+}
+
+export interface ExtratoImportado {
+  criados?: number
+  pagos?: number
+  faturas?: number
+  emprestimos?: number
+  transferencias?: number
+  repetidos?: number
+}

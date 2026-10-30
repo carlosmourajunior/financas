@@ -44,6 +44,8 @@ Todas as rotas, menos cadastro e login, exigem `Authorization: Bearer <token>`. 
 | `/api/pagamentos-fatura/` | Marca uma fatura como paga (`cartao`, `fecha`; valor e data opcionais) ou desfaz (`DELETE`) |
 | `POST /api/importar/fatura/` | Lê a fatura (`arquivo` e `cartao`, multipart) e devolve as linhas para revisar, sem gravar. Aceita CSV ou PDF do Nubank, PDF do Itaú e CSV do Sicredi |
 | `POST /api/importar/fatura/confirmar/` | Grava as linhas escolhidas (`cartao`, `fecha` do ciclo, `itens`). Importar de novo o mesmo período substitui o que foi importado antes; o que foi lançado à mão fica. Uma parcela k de n cria também as seguintes |
+| `POST /api/importar/extrato/` | Lê o extrato da conta (`arquivo` e `conta`, multipart) e devolve os movimentos com a classe sugerida, sem gravar. Aceita CSV do Banco do Brasil |
+| `POST /api/importar/extrato/confirmar/` | Grava os movimentos escolhidos. Cada um é `despesa` ou `receita` (único, parcelado ou recorrente), `transferencia` (não grava), `fatura` (marca a fatura do cartão como paga) ou `emprestimo` (registra o pagamento). Não duplica ao importar de novo |
 
 Testes do backend: `docker compose exec backend python manage.py test`.
 

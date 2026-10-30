@@ -1,14 +1,33 @@
 import { useState } from 'react'
+import BotaoPagar from '../components/BotaoPagar'
 import { Erro } from '../components/Formularios'
 import { Abas, Barra, Campo, Titulo, botaoPrimario, botaoSecundario, campo } from '../components/ui'
 import { api, type Pagina } from '../lib/api'
-import { diaMes, isoData, maiuscula } from '../lib/datas'
+import { diaMes, isoData, lerData, maiuscula } from '../lib/datas'
 import { moeda, paraCentavos, pct } from '../lib/format'
 import type { Emprestimo } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 import { useEnvio } from '../lib/useEnvio'
 
 type Aba = 'devo' | 'devem'
+
+const linkDiscreto = 'min-h-7 cursor-pointer text-[13px] font-semibold text-suave underline underline-offset-2'
+
+/** Mesma regra da API: a 1ª parcela vence no primeiro dia de vencimento depois da contratação. */
+function parcelasVencidas(data: string, dia: number | null, parcelas: number) {
+  if (!data || !parcelas) return 0
+  const inicio = lerData(data)
+  const d = dia || inicio.getDate()
+  const noMes = (ano: number, mes: number) => new Date(ano, mes, Math.min(d, new Date(ano, mes + 1, 0).getDate()))
+  let primeira = noMes(inicio.getFullYear(), inicio.getMonth())
+  if (primeira <= inicio) primeira = noMes(inicio.getFullYear(), inicio.getMonth() + 1)
+  const hoje = lerData(isoData(new Date()))
+  let vencidas = 0
+  for (let k = 0; k < parcelas; k++) {
+    if (noMes(primeira.getFullYear(), primeira.getMonth() + k) < hoje) vencidas++
+  }
+  return vencidas
+}
 
 function juros(valor: string | null) {
   if (!valor) return null
@@ -20,7 +39,9 @@ export default function Emprestimos() {
   const [novo, setNovo] = useState(false)
   const devo = aba === 'devo'
   const resposta = useApi<Pagina<Emprestimo>>(`/emprestimos/?direcao=${aba}&limit=500`)
-  const itens = (resposta.dados?.results ?? []).filter((e) => e.saldo > 0)
+  const todos = resposta.dados?.results ?? []
+  const itens = todos.filter((e) => e.saldo > 0)
+  const quitados = todos.filter((e) => e.saldo <= 0)
   const total = itens.reduce((s, e) => s + e.saldo, 0)
   const porMes = itens.reduce((s, e) => s + (e.parcela_valor ?? 0), 0)
   const comPrazo = itens.filter((e) => e.prazo).length
@@ -65,8 +86,19 @@ export default function Emprestimos() {
         ))}
       </div>
 
+      {quitados.length > 0 && (
+        <details className="text-suave">
+          <summary className="cursor-pointer py-2 text-[15px] font-bold">
+            {devo ? 'Quitados' : 'Já devolvidos'} ({quitados.length})
+          </summary>
+          {quitados.map((e) => (
+            <ItemEmprestimo key={e.id} e={e} aoMudar={resposta.recarregar} />
+          ))}
+        </details>
+      )}
+
       {novo ? (
-        <NovoEmprestimo
+        <FormEmprestimo
           direcao={aba}
           aoCancelar={() => setNovo(false)}
           aoSalvar={() => {
@@ -85,6 +117,24 @@ export default function Emprestimos() {
 
 function ItemEmprestimo({ e, aoMudar }: { e: Emprestimo; aoMudar: () => void }) {
   const [pagando, setPagando] = useState(false)
+  const [editando, setEditando] = useState(false)
+  const [apagando, setApagando] = useState(false)
+  const [vendoPagamentos, setVendoPagamentos] = useState(false)
+
+  if (editando) {
+    return (
+      <FormEmprestimo
+        direcao={e.direcao}
+        e={e}
+        aoCancelar={() => setEditando(false)}
+        aoSalvar={() => {
+          setEditando(false)
+          aoMudar()
+        }}
+      />
+    )
+  }
+
   const devo = e.direcao === 'devo'
   const detalhes = [e.instituicao, juros(e.juros_mensal)].filter(Boolean).join(', ')
 
@@ -133,6 +183,45 @@ function ItemEmprestimo({ e, aoMudar }: { e: Emprestimo; aoMudar: () => void }) 
           </button>
         )}
       </div>
+      <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <button type="button" onClick={() => setEditando(true)} className={linkDiscreto}>
+          Editar
+        </button>
+        {e.pagamentos.length > 0 && (
+          <button type="button" onClick={() => setVendoPagamentos(!vendoPagamentos)} className={linkDiscreto}>
+            {vendoPagamentos ? 'Esconder pagamentos' : `Ver pagamentos (${e.pagamentos.length})`}
+          </button>
+        )}
+        {!apagando && (
+          <button type="button" onClick={() => setApagando(true)} className={linkDiscreto}>
+            Apagar
+          </button>
+        )}
+      </span>
+      {apagando && (
+        <span className="flex flex-wrap items-center gap-2 rounded-[10px] bg-nevoa px-3 py-2">
+          <span className="text-sm font-semibold">Apagar {e.nome} e os {e.pagamentos.length} pagamentos registrados?</span>
+          <BotaoPagar rotulo="Apagar" acao={() => api(`/emprestimos/${e.id}/`, { method: 'DELETE' })} aoMudar={aoMudar} />
+          <button type="button" onClick={() => setApagando(false)} className="min-h-10 cursor-pointer px-2 text-sm font-semibold text-suave">
+            Cancelar
+          </button>
+        </span>
+      )}
+      {vendoPagamentos && (
+        <ul className="flex flex-col rounded-[10px] bg-nevoa px-3 py-1">
+          {[...e.pagamentos].reverse().map((p) => (
+            <li key={p.id} className="flex items-center justify-between gap-3 border-b border-linha py-1.5 text-sm last:border-0">
+              <span>
+                {diaMes(p.data)}/{p.data.slice(0, 4)}
+              </span>
+              <span className="flex items-center gap-3">
+                <span className="font-semibold tabular-nums">{moeda(p.valor)}</span>
+                <BotaoPagar rotulo="Apagar" discreto acao={() => api(`/pagamentos-emprestimo/${p.id}/`, { method: 'DELETE' })} aoMudar={aoMudar} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       {pagando && (
         <Pagamento
           e={e}
@@ -181,45 +270,69 @@ function Pagamento({ e, aoSalvar, aoCancelar }: { e: Emprestimo; aoSalvar: () =>
   )
 }
 
-function NovoEmprestimo({ direcao, aoSalvar, aoCancelar }: { direcao: Aba; aoSalvar: () => void; aoCancelar: () => void }) {
+function texto(centavos: number | null) {
+  return centavos ? (centavos / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : ''
+}
+
+/** Cria ou, com `e`, edita um empréstimo. `inicial` preenche um novo (vindo do extrato, por exemplo). */
+export function FormEmprestimo({
+  direcao,
+  e,
+  inicial,
+  aoSalvar,
+  aoCancelar,
+}: {
+  direcao: Aba
+  e?: Emprestimo
+  inicial?: Partial<Emprestimo>
+  aoSalvar: (salvo: Emprestimo) => void
+  aoCancelar: () => void
+}) {
   const devo = direcao === 'devo'
-  const [nome, setNome] = useState('')
-  const [instituicao, setInstituicao] = useState('')
-  const [valor, setValor] = useState('')
-  const [parcela, setParcela] = useState('')
-  const [parcelas, setParcelas] = useState('')
-  const [jurosMes, setJurosMes] = useState('')
-  const [dia, setDia] = useState('')
-  const [data, setData] = useState(() => isoData(new Date()))
-  const [prazo, setPrazo] = useState('')
+  const base = e ?? inicial
+  const [nome, setNome] = useState(base?.nome ?? '')
+  const [instituicao, setInstituicao] = useState(base?.instituicao ?? '')
+  const [valor, setValor] = useState(texto(base?.valor_total ?? null))
+  const [parcela, setParcela] = useState(texto(base?.parcela_valor ?? null))
+  const [parcelas, setParcelas] = useState(e?.parcelas_total ? String(e.parcelas_total) : '')
+  const [jurosMes, setJurosMes] = useState(e?.juros_mensal ? e.juros_mensal.replace('.', ',') : '')
+  const [dia, setDia] = useState(base?.dia_vencimento ? String(base.dia_vencimento) : '')
+  const [data, setData] = useState(() => e?.data ?? isoData(new Date()))
+  const [prazo, setPrazo] = useState(e?.prazo ?? '')
+  // Vazio segue a conta das parcelas vencidas; um número digitado vale no lugar dela.
+  const [jaPagas, setJaPagas] = useState('')
+
+  const vencidas = parcelasVencidas(data, dia ? Number(dia) : null, Number(parcelas) || 0)
+  const pagasNaCriacao = jaPagas === '' ? vencidas : Math.min(Number(jaPagas) || 0, Number(parcelas) || 0)
+  const mostraJaPagas = devo && !e && Boolean(parcela) && Number(parcelas) > 0
 
   const { erro, enviando, enviar } = useEnvio(async () => {
     const total = paraCentavos(valor)
     if (total <= 0) throw new Error('Informe um valor maior que zero.')
-    await api('/emprestimos/', {
-      method: 'POST',
-      body: {
-        direcao,
-        nome,
-        data,
-        valor_total: total,
-        ...(devo
-          ? {
-              instituicao,
-              parcela_valor: parcela ? paraCentavos(parcela) : null,
-              parcelas_total: parcelas ? Number(parcelas) : null,
-              juros_mensal: jurosMes ? jurosMes.replace(',', '.') : null,
-              dia_vencimento: dia ? Number(dia) : null,
-            }
-          : { prazo: prazo || null }),
-      },
-    })
-    aoSalvar()
+    const corpo = {
+      direcao,
+      nome,
+      data,
+      valor_total: total,
+      ...(devo
+        ? {
+            instituicao,
+            parcela_valor: parcela ? paraCentavos(parcela) : null,
+            parcelas_total: parcelas ? Number(parcelas) : null,
+            juros_mensal: jurosMes ? jurosMes.replace(',', '.') : null,
+            dia_vencimento: dia ? Number(dia) : null,
+          }
+        : { prazo: prazo || null }),
+    }
+    const salvo = e
+      ? await api<Emprestimo>(`/emprestimos/${e.id}/`, { method: 'PATCH', body: corpo })
+      : await api<Emprestimo>('/emprestimos/', { method: 'POST', body: { ...corpo, ...(mostraJaPagas ? { parcelas_ja_pagas: pagasNaCriacao } : {}) } })
+    aoSalvar(salvo)
   })
 
   return (
-    <form onSubmit={enviar} className="mt-2 flex flex-col gap-4 border-t border-linha pt-5">
-      <h2 className="font-display text-[21px] font-bold">{devo ? 'Novo empréstimo' : 'Quem te deve'}</h2>
+    <form onSubmit={enviar} className={`flex flex-col gap-4 ${inicial ? '' : 'mt-2 border-t border-linha pt-5'}`}>
+      <h2 className="font-display text-[21px] font-bold">{e ? `Editar ${e.nome}` : devo ? 'Novo empréstimo' : 'Quem te deve'}</h2>
       <Campo label={devo ? 'Nome do empréstimo' : 'Pessoa'}>
         <input
           required
@@ -260,6 +373,26 @@ function NovoEmprestimo({ direcao, aoSalvar, aoCancelar }: { direcao: Aba; aoSal
               <input type="number" min={1} max={28} value={dia} onChange={(ev) => setDia(ev.target.value)} className={campo} />
             </Campo>
           </div>
+          {mostraJaPagas && (
+            <div className="flex flex-col gap-1.5">
+              <Campo label="Parcelas já pagas">
+                <input
+                  type="number"
+                  min={0}
+                  max={Number(parcelas)}
+                  value={jaPagas === '' ? String(vencidas) : jaPagas}
+                  onChange={(ev) => setJaPagas(ev.target.value)}
+                  className={campo}
+                />
+              </Campo>
+              <p className="text-sm text-suave">
+                {vencidas === 0
+                  ? 'Nenhuma parcela venceu até hoje.'
+                  : `${vencidas} ${vencidas === 1 ? 'parcela venceu' : 'parcelas venceram'} até hoje e entram como pagas. Se alguma está atrasada, diminua o número.`}
+              </p>
+            </div>
+          )}
+          {e && <p className="text-sm text-suave">Os pagamentos já registrados não mudam. Para corrigir um, use Ver pagamentos.</p>}
         </>
       ) : (
         <Campo label="Combinado para devolver em">

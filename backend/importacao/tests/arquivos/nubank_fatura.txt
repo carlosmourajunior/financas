@@ -1,0 +1,48 @@
+Olá, Fulano.
+Esta é a sua fatura de
+outubro, no valor de
+R$ 1.234,56
+Data de vencimento: 22 OUT 2026
+Período vigente: 15 SET a 15 OUT
+1 de 4
+FULANO DE TAL
+FATURA 22 OUT 2026 EMISSÃO E ENVIO 15 OUT 2026
+Realize o pagamento mínimo
+Total a pagar R$ 1.400,00 R$ 1.600,00
+RESUMO DA FATURA ATUAL
+Fatura anterior R$ 500,00
+Pagamento recebido −R$ 500,00
+Total a pagar R$ 1.234,56
+Nu Pagamentos S.A. SAC 4020 0182
+2 de 4
+FULANO DE TAL
+FATURA 22 OUT 2026 EMISSÃO E ENVIO 15 OUT 2026
+TRANSAÇÕES DE 15 SET A 15 OUT
+Fulano de Tal R$ 1.044,55
+15 SET •••• 1111 Loja Exemplo - Parcela 3/6 R$ 100,00
+16 SET •••• 1111 Restaurante Exemplo R$ 50,50
+19 SET •••• 2222 Assinatura Digital R$ 29,90
+23 SET IOF de "Servico Exterior" R$ 4,00
+23 SET •••• 1111 Servico Exterior R$ 114,34
+BRL 110.00 = USD 21.49
+Conversão: BRL 5.32 = USD 1 = R$ 5,32
+25 SET Estorno de "Assinatura Digital" −R$ 29,90
+Estorno referente a compra em Assinatura Digital, de valor R$ 29,90, realizada
+em 19 de Setembro de 2026
+14 OUT •••• 1111 Mercado Exemplo R$ 775,71
+Pagamentos e Financiamentos R$ 190,00
+23 SET Pagamento em 23 SET −R$ 500,00
+15 SET Pix Exemplo - Parcela 2/3 R$ 150,00
+22 SET Crédito de atraso −R$ 300,00
+22 SET Saldo em atraso R$ 300,00
+23 SET Saldo em rotativo R$ 300,00
+23 SET Crédito de rotativo −R$ 300,00
+23 SET Encerramento de dívida −R$ 7,32
+23 SET Juros de dívida encerrada R$ 7,32
+23 SET Multa de atraso R$ 40,00
+• Saldo em aberto de R$ 300,00.
+3 de 4
+FULANO DE TAL
+TRANSAÇÕES DE 15 SET A 15 OUT
+13 OUT IOF de rotativo R$ 0,05
+4 de 4

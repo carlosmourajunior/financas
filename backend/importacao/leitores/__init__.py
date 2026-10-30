@@ -17,6 +17,8 @@ def _texto(conteudo: bytes) -> str:
 
 def ler_fatura(conteudo: bytes, nome_arquivo: str = "") -> FaturaLida:
     if conteudo.startswith(b"%PDF"):
+        if nubank.eh_nubank_pdf(conteudo):
+            return nubank.ler_pdf(conteudo)
         return itau.ler_pdf(conteudo)
     texto = _texto(conteudo)
     if not texto.strip():
@@ -25,4 +27,4 @@ def ler_fatura(conteudo: bytes, nome_arquivo: str = "") -> FaturaLida:
         return nubank.ler(texto, nome_arquivo)
     if sicredi.eh_sicredi(texto):
         return sicredi.ler(texto, nome_arquivo)
-    raise FormatoDesconhecido("Ainda não lemos faturas neste formato. Por enquanto: CSV do Nubank, PDF do Itaú e CSV do Sicredi.")
+    raise FormatoDesconhecido("Ainda não lemos faturas neste formato. Por enquanto: CSV ou PDF do Nubank, PDF do Itaú e CSV do Sicredi.")

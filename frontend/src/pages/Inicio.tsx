@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
 import { FormConta } from '../components/Formularios'
@@ -181,6 +181,7 @@ export default function Inicio() {
           <Secao titulo={`${maiuscula(MESES[hoje.getMonth()])} até agora`}>
             <LinhaResumo rotulo="Entrou" sub="Recebimentos na conta" valor={m(r.entrou)} classe="text-musgo" />
             <LinhaResumo rotulo="Gastou" sub={`Contas e faturas que fecham em ${MESES[hoje.getMonth()]}`} valor={m(r.saiu)} />
+            <Detalhamento d={r.gastou_detalhe} m={m} />
             <LinhaResumo
               rotulo="Sai da conta"
               sub={
@@ -384,6 +385,56 @@ function BotaoOlho({ oculto, onClick }: { oculto: boolean; onClick: () => void }
     >
       <Icon name="olho" />
     </button>
+  )
+}
+
+/** O Gastou dividido: cartões (pela fatura) e lançamentos fora do cartão, por tipo. */
+function Detalhamento({ d, m }: { d: Resumo['gastou_detalhe']; m: (c: number) => string }) {
+  const cartoes = d.cartoes.reduce((s, c) => s + c.valor, 0)
+  const contas = d.recorrentes + d.parceladas + d.avulsas
+  const tiposConta = [
+    { nome: 'Fixas e recorrentes', valor: d.recorrentes },
+    { nome: 'Avulsas', valor: d.avulsas },
+    { nome: 'Parceladas', valor: d.parceladas },
+  ].filter((t) => t.valor > 0)
+  if (cartoes === 0 && contas === 0) return null
+  return (
+    <div className="flex flex-col gap-3 border-b border-linha py-3 pl-4">
+      {d.cartoes.length > 0 && (
+        <Grupo titulo="Cartões" valor={m(cartoes)}>
+          {d.cartoes.map((c) => (
+            <Link key={c.cartao} to={`/cartoes?cartao=${c.cartao}&fecha=${c.fecha}`} className="flex justify-between gap-3 py-0.5 hover:underline">
+              <span>
+                {c.nome} <span className="text-suave">vence {diaMes(c.vence)}</span>
+              </span>
+              <span className="tabular-nums">{m(c.valor)}</span>
+            </Link>
+          ))}
+        </Grupo>
+      )}
+      {contas > 0 && (
+        <Grupo titulo="Contas e despesas" valor={m(contas)}>
+          {tiposConta.map((t) => (
+            <Link key={t.nome} to="/lancamentos" className="flex justify-between gap-3 py-0.5 hover:underline">
+              <span>{t.nome}</span>
+              <span className="tabular-nums">{m(t.valor)}</span>
+            </Link>
+          ))}
+        </Grupo>
+      )}
+    </div>
+  )
+}
+
+function Grupo({ titulo, valor, children }: { titulo: string; valor: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col text-[15px]">
+      <div className="flex justify-between gap-3 font-bold">
+        <span>{titulo}</span>
+        <span className="tabular-nums">{valor}</span>
+      </div>
+      <div className="flex flex-col border-l-2 border-linha pl-3 pt-1 text-sm">{children}</div>
+    </div>
   )
 }
 

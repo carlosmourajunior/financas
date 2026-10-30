@@ -225,6 +225,9 @@ class SaiuDoMesTests(ApiBase):
         # As categorias usam as mesmas compras; a de 20/10 é da fatura de novembro.
         self.assertEqual(sum(c["valor"] for c in r["categorias"]), 9_000 + 5_000)
         self.assertEqual(r["creditos_cartao"], 1_000)
+        d = r["gastou_detalhe"]
+        self.assertEqual([c["valor"] for c in d["cartoes"]], [4_000])
+        self.assertEqual((d["avulsas"], d["recorrentes"], d["parceladas"]), (9_000, 0, 0))
 
     def test_parcelas_de_compras_anteriores_aparecem_separadas(self):
         self.lancar(descricao="TV", valor=40_000, tipo="parcelada", parcelas=4, cartao=self.cartao.id, data="2026-08-10")

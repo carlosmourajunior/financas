@@ -392,10 +392,13 @@ def resumo(dono, hoje: date) -> dict:
     # Gasto do mês: o que é pago fora do cartão com data no mês, mais cada fatura inteira no mês em que fecha.
     no_mes = Q(cartao__isnull=True, data__gte=inicio, data__lte=fim)
     faturas_que_fecham = 0
+    por_cartao = []
     for c in cartoes:
         f = fatura_que_fecha_em(c, somar_meses(inicio, 0, c.dia_fechamento))
         no_mes |= Q(cartao=c, data__gte=f.abre, data__lte=f.fecha)
         faturas_que_fecham += f.total
+        if f.total:
+            por_cartao.append({"cartao": c.id, "nome": str(c), "valor": f.total, "fecha": f.fecha, "vence": f.vence})
     gastos = lanc.filter(no_mes, natureza=Natureza.DESPESA)
     creditos = _soma(lanc.filter(no_mes, natureza=Natureza.RECEITA, cartao__isnull=False))
     categorias = (
@@ -454,6 +457,13 @@ def resumo(dono, hoje: date) -> dict:
         "entrou": _soma(do_mes.filter(natureza=Natureza.RECEITA, cartao__isnull=True)),
         # Gasto do mês: a fatura entra no mês em que fecha.
         "saiu": _soma(gastos.filter(cartao__isnull=True)) + faturas_que_fecham,
+        # O mesmo gasto dividido: cada cartão pela fatura e os lançamentos fora do cartão.
+        "gastou_detalhe": {
+            "cartoes": por_cartao,
+            "recorrentes": _soma(gastos.filter(cartao__isnull=True, tipo=Lancamento.Tipo.RECORRENTE)),
+            "parceladas": _soma(gastos.filter(cartao__isnull=True, tipo=Lancamento.Tipo.PARCELADA)),
+            "avulsas": _soma(gastos.filter(cartao__isnull=True, tipo=Lancamento.Tipo.UNICA)),
+        },
         # Dinheiro que sai da conta: a fatura entra no mês em que vence.
         "sai_da_conta": _soma(gastos.filter(cartao__isnull=True)) + faturas_que_vencem,
         # Parcelas de compras de meses anteriores: entram no gasto, mas não são compra nova.

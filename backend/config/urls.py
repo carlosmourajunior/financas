@@ -29,5 +29,7 @@ urlpatterns = [
     path("api/faturas/", fin.FaturasView.as_view()),
     path("api/importar/fatura/", imp.PreviaFaturaView.as_view()),
     path("api/importar/fatura/confirmar/", imp.ConfirmarFaturaView.as_view()),
+    path("api/importar/extrato/", imp.PreviaExtratoView.as_view()),
+    path("api/importar/extrato/confirmar/", imp.ConfirmarExtratoView.as_view()),
     path("api/", include(router.urls)),
 ]

@@ -1,6 +1,7 @@
 import { useState, type ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Erro } from '../components/Formularios'
+import ImportarExtrato from './ImportarExtrato'
 import Icon from '../components/Icon'
 import { Abas, Campo, Secao, Titulo, botaoPrimario, campo } from '../components/ui'
 import { api } from '../lib/api'
@@ -86,7 +87,7 @@ export default function Importar() {
       />
 
       {fonte === 'extrato' ? (
-        <p className="rounded-xl bg-nevoa px-4 py-3 text-[15px] text-suave">A leitura de extratos do banco chega na próxima etapa.</p>
+        <ImportarExtrato />
       ) : !cad.carregando && cad.cartoes.length === 0 ? (
         <p className="text-[17px] leading-snug text-suave">
           Para importar uma fatura, primeiro{' '}
@@ -124,7 +125,7 @@ export default function Importar() {
         </>
       )}
 
-      {erro && <Erro>{erro}</Erro>}
+      {erro && fonte === 'fatura' && <Erro>{erro}</Erro>}
 
       {previa && fonte === 'fatura' && (
         <div className="flex flex-col gap-6 pt-3">

@@ -62,6 +62,17 @@ def criar_parcelas(*, dono, valor_total: int, parcelas: int, primeira: date, **c
     return Lancamento.objects.bulk_create(criadas)
 
 
+def vencimentos_das_parcelas(emprestimo) -> list[date]:
+    """Vencimento de cada parcela: a 1ª no primeiro dia de vencimento depois da contratação, as outras mês a mês."""
+    if not emprestimo.parcela_valor or not emprestimo.parcelas_total:
+        return []
+    dia = emprestimo.dia_vencimento or emprestimo.data.day
+    primeira = somar_meses(emprestimo.data, 0, dia)
+    if primeira <= emprestimo.data:
+        primeira = somar_meses(emprestimo.data, 1, dia)
+    return [somar_meses(primeira, k, dia) for k in range(emprestimo.parcelas_total)]
+
+
 # Recorrências -------------------------------------------------------------
 
 

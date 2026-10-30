@@ -147,6 +147,7 @@ export interface Emprestimo {
   pago: number
   saldo: number
   parcelas_pagas: number | null
+  pagamentos: { id: number; valor: number; data: string }[]
 }
 
 export interface ItemImportado {

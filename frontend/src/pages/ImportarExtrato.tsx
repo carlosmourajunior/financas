@@ -1,6 +1,7 @@
-import { useState, type ChangeEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Erro, FormConta } from '../components/Formularios'
+import { FormEmprestimo } from './Emprestimos'
 import Icon from '../components/Icon'
 import { Abas, Campo, Secao, botaoPrimario, campo } from '../components/ui'
 import { api, type Pagina } from '../lib/api'
@@ -27,6 +28,33 @@ const TIPOS: { id: Tipo; label: string }[] = [
 type Filtro = 'todas' | 'despesa' | 'receita' | 'outras'
 
 const NOVA = 'nova'
+const GUARDADA = 'importar-extrato'
+
+interface Guardada {
+  conta: string
+  nomeArquivo: string
+  previa: PreviaExtrato
+  itens: MovimentoImportado[]
+}
+
+/** A revisão em andamento fica no navegador: recarregar a página não perde o que já foi classificado. */
+function lerGuardada(): Guardada | null {
+  try {
+    const t = sessionStorage.getItem(GUARDADA)
+    return t ? (JSON.parse(t) as Guardada) : null
+  } catch {
+    return null
+  }
+}
+
+function guardar(g: Guardada | null) {
+  try {
+    if (g) sessionStorage.setItem(GUARDADA, JSON.stringify(g))
+    else sessionStorage.removeItem(GUARDADA)
+  } catch {
+    // Sem armazenamento (aba anônima, cota cheia): segue sem guardar.
+  }
+}
 
 const miniSelect = '-my-1 min-h-9 max-w-full cursor-pointer rounded-lg border border-linha bg-white px-2 py-1 text-sm text-tinta'
 
@@ -39,18 +67,24 @@ export default function ImportarExtrato() {
   const navigate = useNavigate()
   const cad = useCadastros()
   const emprestimos = useApi<Pagina<Emprestimo>>('/emprestimos/?direcao=devo&limit=500')
-  const [conta, setConta] = useState('')
-  const [nomeArquivo, setNomeArquivo] = useState('')
-  const [previa, setPrevia] = useState<PreviaExtrato | null>(null)
-  const [itens, setItens] = useState<MovimentoImportado[]>([])
+  const [guardada] = useState(lerGuardada)
+  const [conta, setConta] = useState(guardada?.conta ?? '')
+  const [nomeArquivo, setNomeArquivo] = useState(guardada?.nomeArquivo ?? '')
+  const [previa, setPrevia] = useState<PreviaExtrato | null>(guardada?.previa ?? null)
+  const [itens, setItens] = useState<MovimentoImportado[]>(guardada?.itens ?? [])
   const [mexidos, setMexidos] = useState<Set<number>>(new Set())
   const [filtro, setFiltro] = useState<Filtro>('todas')
   const [erro, setErro] = useState<string | null>(null)
   const [lendo, setLendo] = useState(false)
   const [gravando, setGravando] = useState(false)
   const [novaConta, setNovaConta] = useState(false)
+  const [novoEmprestimo, setNovoEmprestimo] = useState<number | null>(null)
 
   const contaEscolhida = conta || (cad.contas[0] ? String(cad.contas[0].id) : '')
+
+  useEffect(() => {
+    guardar(previa ? { conta: contaEscolhida, nomeArquivo, previa, itens } : null)
+  }, [contaEscolhida, nomeArquivo, previa, itens])
   const marcados = itens.filter((i) => i.importar && i.classe !== 'transferencia')
   const saem = marcados.filter((i) => i.natureza === 'despesa').reduce((s, i) => s + i.valor, 0)
   const entram = marcados.filter((i) => i.natureza === 'receita').reduce((s, i) => s + i.valor, 0)
@@ -68,6 +102,7 @@ export default function ImportarExtrato() {
     corpo.append('conta', contaEscolhida)
     try {
       const p = await api<PreviaExtrato>('/importar/extrato/', { method: 'POST', body: corpo })
+      setConta(contaEscolhida)
       setPrevia(p)
       setItens(p.itens)
       setMexidos(new Set())
@@ -101,6 +136,7 @@ export default function ImportarExtrato() {
         method: 'POST',
         body: { conta: Number(contaEscolhida), itens: itens.filter((i) => i.importar) },
       })
+      guardar(null)
       navigate('/lancamentos', { state: { importado: r } })
     } catch (err) {
       setErro((err as Error).message || 'Não foi possível importar.')
@@ -167,6 +203,21 @@ export default function ImportarExtrato() {
 
       {erro && <Erro>{erro}</Erro>}
 
+      {novoEmprestimo !== null && itens[novoEmprestimo] && (
+        <Janela titulo="Novo empréstimo" aoFechar={() => setNovoEmprestimo(null)}>
+          <FormEmprestimo
+            direcao="devo"
+            inicial={inicialDoEmprestimo(itens[novoEmprestimo], previa?.banco ?? '')}
+            aoCancelar={() => setNovoEmprestimo(null)}
+            aoSalvar={(salvo) => {
+              emprestimos.recarregar()
+              mudar(novoEmprestimo, { classe: 'emprestimo', emprestimo: salvo.id, categoria: null, aviso: '' }, true)
+              setNovoEmprestimo(null)
+            }}
+          />
+        </Janela>
+      )}
+
       {previa && (
         <div className="flex flex-col gap-6 pt-3">
           <Secao titulo="Classifique antes de importar">
@@ -194,6 +245,7 @@ export default function ImportarExtrato() {
                   cad.recarregar()
                   mudar(indice, { categoria: c.id }, true)
                 }}
+                aoNovoEmprestimo={() => setNovoEmprestimo(indice)}
               />
             ))}
           </Secao>
@@ -220,6 +272,7 @@ function Linha({
   emprestimos,
   mudar,
   aoCriarCategoria,
+  aoNovoEmprestimo,
 }: {
   l: MovimentoImportado
   categorias: Categoria[]
@@ -227,6 +280,7 @@ function Linha({
   emprestimos: Emprestimo[]
   mudar: (m: Partial<MovimentoImportado>, espalhar?: boolean) => void
   aoCriarCategoria: (c: Categoria) => void
+  aoNovoEmprestimo: () => void
 }) {
   const [criando, setCriando] = useState(false)
   const lanca = l.classe === 'despesa' || l.classe === 'receita'
@@ -377,7 +431,10 @@ function Linha({
                 <select
                   aria-label="Empréstimo"
                   value={l.emprestimo ?? ''}
-                  onChange={(e) => mudar({ emprestimo: Number(e.target.value) }, true)}
+                  onChange={(e) => {
+                    if (e.target.value === NOVA) aoNovoEmprestimo()
+                    else mudar({ emprestimo: Number(e.target.value) }, true)
+                  }}
                   className={miniSelect}
                 >
                   {emprestimos.map((e) => (
@@ -385,11 +442,12 @@ function Linha({
                       {e.nome}
                     </option>
                   ))}
+                  <option value={NOVA}>+ Novo empréstimo</option>
                 </select>
               ) : (
-                <Link to="/emprestimos" className="text-sm font-semibold text-ambar-texto underline">
-                  Cadastre o empréstimo antes
-                </Link>
+                <button type="button" onClick={aoNovoEmprestimo} className="cursor-pointer text-sm font-semibold text-ambar-texto underline">
+                  Cadastrar o empréstimo
+                </button>
               ))}
           </span>
         )}
@@ -397,6 +455,39 @@ function Linha({
           <span className="text-sm text-suave">Não entra como gasto nem como recebimento</span>
         )}
       </span>
+    </div>
+  )
+}
+
+/** O empréstimo novo já vem com o que a linha do extrato diz: parcela, dia do débito e banco. */
+function inicialDoEmprestimo(l: MovimentoImportado, banco: string): Partial<Emprestimo> {
+  const dia = Number(l.data.slice(8, 10))
+  return {
+    nome: l.descricao,
+    instituicao: banco,
+    parcela_valor: l.valor,
+    dia_vencimento: Math.min(dia, 28),
+  }
+}
+
+/** Janela sobre a tela: cadastrar algo sem sair da importação. */
+function Janela({ titulo, aoFechar, children }: { titulo: string; aoFechar: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const fechar = (e: KeyboardEvent) => e.key === 'Escape' && aoFechar()
+    window.addEventListener('keydown', fechar)
+    return () => window.removeEventListener('keydown', fechar)
+  }, [aoFechar])
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-tinta/40 sm:items-center" onClick={aoFechar}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-[20px] bg-fundo px-5 py-5 sm:rounded-[20px]"
+      >
+        {children}
+      </div>
     </div>
   )
 }

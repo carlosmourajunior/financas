@@ -363,3 +363,55 @@ class FaturasNaListaTests(ApiBase):
         self.assertEqual([c["descricao"] for c in r.data["compras"]], ["Mercado"])
         self.assertEqual(str(r.data["fatura"]["anterior"]), "2026-09-03")
         self.assertEqual(self.client.get(f"/api/cartoes/{self.cartao.id}/detalhe/?fecha=ontem").status_code, 400)
+
+
+class EmprestimoParcelasPagasTests(ApiBase):
+    def criar(self, **extra):
+        hoje = date.today()
+        corpo = {
+            "direcao": "devo",
+            "nome": "CDC",
+            "valor_total": 120_000,
+            "parcela_valor": 10_000,
+            "parcelas_total": 12,
+            # Contratado há 5 meses, vence todo dia 5 a partir do mês seguinte.
+            "data": str(somar_meses(hoje, -5, 10)),
+            "dia_vencimento": 5,
+            **extra,
+        }
+        r = self.client.post("/api/emprestimos/", corpo, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        return Emprestimo.objects.get(pk=r.data["id"])
+
+    def test_parcelas_vencidas_entram_como_pagas(self):
+        e = self.criar()
+        hoje = date.today()
+        esperado = 5 if hoje.day > 5 else 4  # a deste mês só conta depois do dia 5
+        datas = list(e.pagamentos.order_by("data").values_list("data", flat=True))
+        self.assertEqual(len(datas), esperado)
+        self.assertEqual(datas[0], somar_meses(hoje, -4, 5))
+        self.assertTrue(all(d < hoje for d in datas))
+        r = self.client.get(f"/api/emprestimos/{e.id}/")
+        self.assertEqual((r.data["parcelas_pagas"], r.data["saldo"]), (esperado, 120_000 - esperado * 10_000))
+
+    def test_numero_informado_vale_no_lugar_da_conta(self):
+        self.assertEqual(self.criar(parcelas_ja_pagas=2).pagamentos.count(), 2)
+        self.assertEqual(self.criar(parcelas_ja_pagas=0).pagamentos.count(), 0)
+
+    def test_editar_nao_mexe_nos_pagamentos_e_apagar_leva_junto(self):
+        e = self.criar(parcelas_ja_pagas=3)
+        r = self.client.patch(f"/api/emprestimos/{e.id}/", {"nome": "CDC BB", "parcelas_total": 24}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        e.refresh_from_db()
+        self.assertEqual((e.nome, e.parcelas_total, e.pagamentos.count()), ("CDC BB", 24, 3))
+        self.assertEqual(self.client.delete(f"/api/emprestimos/{e.id}/").status_code, 204)
+        self.assertFalse(Emprestimo.objects.filter(pk=e.id).exists())
+
+    def test_sem_parcelas_nao_cria_pagamento(self):
+        e = self.criar(parcela_valor=None, parcelas_total=None)
+        self.assertEqual(e.pagamentos.count(), 0)
+
+    def test_saldo_da_conta_nao_muda(self):
+        antes = resumo(self.usuario, date.today())["saldo_em_conta"]
+        self.criar()
+        self.assertEqual(resumo(self.usuario, date.today())["saldo_em_conta"], antes)

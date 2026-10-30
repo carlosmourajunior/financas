@@ -117,7 +117,7 @@ export default function Importar() {
             <Icon name="arquivo" size={28} />
             <span className="flex flex-col gap-0.5">
               <span className="text-base font-bold">{lendo ? 'Lendo o arquivo…' : nomeArquivo || 'Escolher arquivo'}</span>
-              <span className="text-sm text-suave">CSV do Nubank, PDF do Itaú ou CSV do Sicredi</span>
+              <span className="text-sm text-suave">CSV ou PDF do Nubank, PDF do Itaú ou CSV do Sicredi</span>
             </span>
             <input type="file" accept=".pdf,.csv" onChange={ler} disabled={lendo} className="sr-only" />
           </label>

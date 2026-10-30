@@ -8,8 +8,7 @@ from rest_framework.test import APITestCase
 
 from financas.models import Cartao, Categoria, Lancamento, criar_categorias_padrao
 from financas.servicos import fatura_que_fecha_em
-from importacao.leitores import FormatoDesconhecido, Tipo, ler_fatura
-from importacao.leitores import itau
+from importacao.leitores import FormatoDesconhecido, Tipo, itau, ler_fatura, nubank
 from importacao.servicos import confirmar, previa
 
 ARQUIVOS = Path(__file__).parent / "arquivos"
@@ -41,6 +40,26 @@ class LeitoresTests(TestCase):
         self.assertEqual(tipos["Valor pendente do mês anterior"], Tipo.SALDO_ANTERIOR)
         self.assertEqual(tipos["Multa por fatura atrasada"], Tipo.ENCARGO)
         self.assertEqual(tipos['Estorno de "Pg *Restaurante" (Restaurante)'], Tipo.CREDITO)
+
+    def test_nubank_pdf_confere_com_o_total(self):
+        paginas = (ARQUIVOS / "nubank_fatura.txt").read_text(encoding="utf-8").split("\f")
+        f = nubank.ler_paginas(paginas)
+        self.assertEqual((f.banco, f.final, f.vencimento, f.total), ("Nubank", "1111", date(2026, 10, 22), 123_456))
+        self.assertTrue(f.conferida, f.total_calculado)
+        por_nome = {i.descricao: i for i in f.itens}
+        loja = por_nome["Loja Exemplo"]
+        self.assertEqual((loja.data, loja.parcela_atual, loja.parcela_total, loja.valor), (date(2026, 9, 15), 3, 6, 10_000))
+        self.assertEqual(por_nome["Pix Exemplo"].parcela_atual, 2)
+        self.assertEqual(por_nome["Mercado Exemplo"].data, date(2026, 10, 14))
+        self.assertEqual(por_nome['IOF de "Servico Exterior"'].tipo, Tipo.ENCARGO)
+        self.assertEqual(por_nome['Estorno de "Assinatura Digital"'].tipo, Tipo.CREDITO)
+        self.assertEqual(por_nome["Pagamento em 23 SET"].tipo, Tipo.PAGAMENTO)
+        self.assertEqual(por_nome["Fatura anterior"].valor, 50_000)
+        # Atraso e rotativo entram e saem da fatura: se anulam e não viram lançamento.
+        self.assertFalse(any("rotativo" in d.lower() and "iof" not in d.lower() for d in por_nome))
+        self.assertNotIn("Saldo em atraso", por_nome)
+        # Os centavos que o próprio PDF não fecha viram um ajuste à parte.
+        self.assertEqual(por_nome["Ajuste de centavos do Nubank"].valor, -4)
 
     def test_sicredi_confere_com_o_total(self):
         f = ler_fatura(ler("sicredi.csv"), "sicredi.csv")

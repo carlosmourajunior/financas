@@ -3,7 +3,7 @@ from datetime import date
 from rest_framework import serializers
 
 from .models import Cartao, Categoria, Conta, Emprestimo, Frequencia, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
-from .servicos import criar_parcelas, fatura_que_fecha_em, gerar_ocorrencias, somar_meses
+from .servicos import criar_parcelas, fatura_que_fecha_em, gerar_ocorrencias, somar_meses, vencimentos_das_parcelas
 
 
 class DoUsuarioSerializer(serializers.ModelSerializer):
@@ -187,6 +187,8 @@ class PagamentoFaturaSerializer(DoUsuarioSerializer):
 
 
 class EmprestimoSerializer(serializers.ModelSerializer):
+    # Só na criação: quantas parcelas já foram pagas. Sem informar, conta as que venceram antes de hoje.
+    parcelas_ja_pagas = serializers.IntegerField(write_only=True, required=False, allow_null=True, min_value=0)
     pagamentos = serializers.SerializerMethodField()
     pago = serializers.SerializerMethodField()
     saldo = serializers.SerializerMethodField()
@@ -209,8 +211,25 @@ class EmprestimoSerializer(serializers.ModelSerializer):
             "pago",
             "saldo",
             "parcelas_pagas",
+            "parcelas_ja_pagas",
             "pagamentos",
         ]
+
+    def create(self, dados):
+        ja_pagas = dados.pop("parcelas_ja_pagas", None)
+        emprestimo = super().create(dados)
+        vencimentos = vencimentos_das_parcelas(emprestimo)
+        if ja_pagas is None:
+            ja_pagas = sum(1 for d in vencimentos if d < date.today())
+        PagamentoEmprestimo.objects.bulk_create(
+            PagamentoEmprestimo(dono=emprestimo.dono, emprestimo=emprestimo, valor=emprestimo.parcela_valor, data=d)
+            for d in vencimentos[:ja_pagas]
+        )
+        return emprestimo
+
+    def update(self, instancia, dados):
+        dados.pop("parcelas_ja_pagas", None)
+        return super().update(instancia, dados)
 
     def _pago(self, e):
         return sum(p.valor for p in e.pagamentos.all())

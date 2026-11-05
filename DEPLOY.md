@@ -11,7 +11,7 @@ https://financas.rlcsolucoes.com.br/admin/  admin do Django
 ## O que precisa
 
 - Docker com o plugin `docker compose` no servidor.
-- Uma porta livre no servidor para o app (padrão 8090, muda em `PORTA` no `.env`).
+- Uma porta livre no servidor para o app (padrão 8099, muda em `PORTA` no `.env`).
 - O domínio `rlcsolucoes.com.br` no Cloudflare e um túnel (Zero Trust > Networks > Tunnels).
 
 ## Primeira vez
@@ -27,7 +27,7 @@ nano .env              # confira DOMINIO e PORTA, cole os dois segredos
 
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
-curl -s http://127.0.0.1:8090/api/saude/   # deve responder {"ok": true}
+curl -s http://127.0.0.1:8099/api/saude/   # deve responder {"ok": true}
 ```
 
 ## Túnel do Cloudflare
@@ -37,9 +37,9 @@ Escolha um dos dois jeitos.
 **A. O servidor já tem um cloudflared rodando** (o mesmo dos outros sistemas). No painel do túnel, em *Public hostnames*, adicione:
 
 - Subdomain `financas`, domain `rlcsolucoes.com.br`
-- Service `HTTP` → `localhost:8090` (ou a `PORTA` que você escolheu)
+- Service `HTTP` → `localhost:8099` (ou a `PORTA` que você escolheu)
 
-Se esse cloudflared roda em container sem `network_mode: host`, use o IP do host na rede do Docker (por exemplo `172.17.0.1:8090`) no lugar de `localhost`, e troque `127.0.0.1` por esse IP no `ports` do serviço `frontend`.
+Se esse cloudflared roda em container sem `network_mode: host`, use o IP do host na rede do Docker (por exemplo `172.17.0.1:8099`) no lugar de `localhost`, e troque `127.0.0.1` por esse IP no `ports` do serviço `frontend`.
 
 **B. Um túnel só para o app, dentro deste compose.** Crie o túnel no painel, copie o token para `CLOUDFLARE_TUNNEL_TOKEN` no `.env` e, em *Public hostnames*, aponte `financas.rlcsolucoes.com.br` para `HTTP` → `frontend:80`. Depois:
 

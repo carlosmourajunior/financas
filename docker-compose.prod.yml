@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
     # Só escuta no próprio servidor; o túnel do Cloudflare chega por aqui.
     ports:
-      - "127.0.0.1:${PORTA:-8090}:80"
+      - "127.0.0.1:${PORTA:-8099}:80"
     depends_on:
       - backend
 

@@ -30,7 +30,8 @@ services:
     environment:
       DJANGO_DEBUG: "0"
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?defina DJANGO_SECRET_KEY no .env}
-      DJANGO_ALLOWED_HOSTS: ${DOMINIO:?defina DOMINIO no .env}
+      # localhost e 127.0.0.1 para testar com curl no próprio servidor
+      DJANGO_ALLOWED_HOSTS: ${DOMINIO:?defina DOMINIO no .env},localhost,127.0.0.1
       CORS_ALLOWED_ORIGINS: https://${DOMINIO}
       CSRF_TRUSTED_ORIGINS: https://${DOMINIO}
       DATABASE_URL: postgres://financas:${POSTGRES_PASSWORD}@db:5432/financas

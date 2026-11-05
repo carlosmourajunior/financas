@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Abas, Campo, botaoPrimario, campo } from '../components/ui'
 import { useAuth } from '../lib/auth'
 
@@ -9,7 +9,8 @@ export default function Login() {
   const navigate = useNavigate()
   const local = useLocation()
   const auth = useAuth()
-  const [modo, setModo] = useState<Modo>('entrar')
+  const [params] = useSearchParams()
+  const [modo, setModo] = useState<Modo>(params.get('modo') === 'criar' ? 'criar' : 'entrar')
   const [nome, setNome] = useState('')
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
@@ -37,8 +38,11 @@ export default function Login() {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-md flex-col gap-7 px-6 pb-8 pt-14">
+    <div className="mx-auto flex min-h-dvh max-w-md flex-col gap-7 px-6 pb-8 pt-8">
       <div className="flex flex-col gap-3.5">
+        <a href="/" className="self-start text-[15px] font-semibold text-suave hover:text-tinta">
+          Voltar ao site
+        </a>
         <h1 className="font-display text-[44px] font-extrabold leading-none tracking-[-1.5px]">Finanças</h1>
         <p className="max-w-[300px] text-lg leading-snug text-suave">
           Saiba quanto ainda pode gastar este mês, com cartões, contas e extratos juntos.

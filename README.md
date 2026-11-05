@@ -7,7 +7,7 @@ Controle financeiro pessoal em formato SaaS: API Django e front React, rodando c
 - `frontend/`: React + Vite + Tailwind, mobile first, com menu lateral no computador
 - `backend/`: API Django + Django REST Framework, PostgreSQL, login com JWT
 - `docker-compose.yml`: ambiente local
-- `docker-compose.prod.yml`: produção com HTTPS e backups (veja [DEPLOY.md](DEPLOY.md))
+- `docker-compose.prod.yml`: produção atrás do túnel do Cloudflare, com backups (veja [DEPLOY.md](DEPLOY.md))
 
 ## Rodar localmente
 

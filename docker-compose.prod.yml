@@ -1,9 +1,12 @@
-# Produção: um domínio só, com HTTPS automático pelo Caddy.
-#   https://DOMINIO/        front (nginx com o build do React)
-#   https://DOMINIO/api/    API Django (gunicorn)
-#   https://DOMINIO/admin/  admin do Django
+# Produção atrás de um túnel do Cloudflare (o HTTPS fica no Cloudflare).
+# O nginx do front é a única porta, em 127.0.0.1:PORTA:
+#   /        front (build do React)
+#   /api/    API Django (gunicorn)
+#   /admin/  admin do Django
 # Uso: docker compose -f docker-compose.prod.yml up -d --build
 # As variáveis vêm do arquivo .env ao lado deste (veja .env.example).
+name: financas
+
 services:
   db:
     image: postgres:17-alpine
@@ -42,25 +45,23 @@ services:
       args:
         VITE_API_URL: /api
     restart: unless-stopped
+    # Só escuta no próprio servidor; o túnel do Cloudflare chega por aqui.
+    ports:
+      - "127.0.0.1:${PORTA:-8090}:80"
     depends_on:
       - backend
 
-  caddy:
-    image: caddy:2.10-alpine
+  # Túnel do Cloudflare dentro do compose (opcional). Só sobe com
+  #   docker compose -f docker-compose.prod.yml --profile tunel up -d
+  # No painel do túnel, o hostname público aponta para http://frontend:80
+  cloudflared:
+    image: cloudflare/cloudflared:2025.10.0
+    profiles: ["tunel"]
     restart: unless-stopped
+    command: tunnel --no-autoupdate run
     environment:
-      DOMINIO: ${DOMINIO}
-      EMAIL_ACME: ${EMAIL_ACME:?defina EMAIL_ACME no .env}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-dados:/data
-      - caddy-config:/config
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on:
-      - backend
       - frontend
 
   # Copia o banco todo dia e guarda os últimos BACKUP_DIAS dias em ./backups
@@ -85,5 +86,3 @@ services:
 
 volumes:
   dados-db:
-  caddy-dados:
-  caddy-config:

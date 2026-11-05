@@ -1,18 +1,18 @@
 # Publicar no servidor
 
-Tudo roda com Docker num servidor só: PostgreSQL, API (gunicorn), front (nginx), o Caddy na frente com HTTPS automático (Let's Encrypt) e um serviço que faz backup do banco todo dia.
+Tudo roda com Docker num servidor só: PostgreSQL, API (gunicorn), front (nginx) e um serviço que faz backup do banco todo dia. O HTTPS fica no Cloudflare: um túnel leva `financas.rlcsolucoes.com.br` até o nginx do app, que escuta só em `127.0.0.1:PORTA` no servidor. Não precisa abrir porta nenhuma, e o app convive com os outros sistemas do servidor.
 
 ```
-https://seu-dominio/        front
-https://seu-dominio/api/    API
-https://seu-dominio/admin/  admin do Django
+https://financas.rlcsolucoes.com.br/        front
+https://financas.rlcsolucoes.com.br/api/    API
+https://financas.rlcsolucoes.com.br/admin/  admin do Django
 ```
 
 ## O que precisa
 
-- Um servidor Linux com Docker e o plugin `docker compose` (1 GB de RAM basta; 2 GB dá folga para o build).
-- Um domínio ou subdomínio com registro **A** apontando para o IP do servidor.
-- Portas 80 e 443 abertas no firewall (o Caddy usa a 80 para pedir o certificado).
+- Docker com o plugin `docker compose` no servidor.
+- Uma porta livre no servidor para o app (padrão 8090, muda em `PORTA` no `.env`).
+- O domínio `rlcsolucoes.com.br` no Cloudflare e um túnel (Zero Trust > Networks > Tunnels).
 
 ## Primeira vez
 
@@ -23,13 +23,31 @@ cp .env.example .env
 # Gere os segredos e cole no .env:
 openssl rand -hex 32   # DJANGO_SECRET_KEY
 openssl rand -hex 24   # POSTGRES_PASSWORD
-nano .env              # preencha DOMINIO, EMAIL_ACME e os dois segredos
+nano .env              # confira DOMINIO e PORTA, cole os dois segredos
 
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
+curl -s http://127.0.0.1:8090/api/saude/   # deve responder {"ok": true}
 ```
 
-Depois abra `https://DOMINIO` e crie sua conta pela tela de cadastro. O superusuário serve para o `/admin`.
+## Túnel do Cloudflare
+
+Escolha um dos dois jeitos.
+
+**A. O servidor já tem um cloudflared rodando** (o mesmo dos outros sistemas). No painel do túnel, em *Public hostnames*, adicione:
+
+- Subdomain `financas`, domain `rlcsolucoes.com.br`
+- Service `HTTP` → `localhost:8090` (ou a `PORTA` que você escolheu)
+
+Se esse cloudflared roda em container sem `network_mode: host`, use o IP do host na rede do Docker (por exemplo `172.17.0.1:8090`) no lugar de `localhost`, e troque `127.0.0.1` por esse IP no `ports` do serviço `frontend`.
+
+**B. Um túnel só para o app, dentro deste compose.** Crie o túnel no painel, copie o token para `CLOUDFLARE_TUNNEL_TOKEN` no `.env` e, em *Public hostnames*, aponte `financas.rlcsolucoes.com.br` para `HTTP` → `frontend:80`. Depois:
+
+```bash
+docker compose -f docker-compose.prod.yml --profile tunel up -d
+```
+
+No Cloudflare, ligue *SSL/TLS > Edge Certificates > Always Use HTTPS* para quem digitar http:// cair no HTTPS.
 
 ## Atualizar para a versão nova da master
 
@@ -39,7 +57,7 @@ git pull
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-As migrações rodam sozinhas quando a API sobe.
+Se usa o túnel do compose, acrescente `--profile tunel`. As migrações rodam sozinhas quando a API sobe.
 
 ## Backups
 
@@ -73,12 +91,12 @@ docker compose -f docker-compose.prod.yml start backend
 
 ```bash
 docker compose -f docker-compose.prod.yml ps            # o que está rodando
-docker compose -f docker-compose.prod.yml logs -f caddy # certificado, acessos
+docker compose -f docker-compose.prod.yml logs -f frontend # acessos
 docker compose -f docker-compose.prod.yml logs -f backend
 ```
 
 ## Segurança
 
 - O `.env` tem os segredos. Ele não vai para o Git (`.gitignore`).
-- Só o Caddy expõe portas (80 e 443). O banco e a API ficam na rede interna do Docker.
+- Só o nginx do front escuta, e só em 127.0.0.1. O banco e a API ficam na rede interna do Docker.
 - Qualquer pessoa que abrir o site pode criar uma conta. Cada conta só vê os próprios dados.

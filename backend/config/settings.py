@@ -122,7 +122,7 @@ SIMPLE_JWT = {
 }
 
 if not DEBUG:
-    # O Caddy termina o HTTPS e avisa o Django pelo cabeçalho X-Forwarded-Proto.
+    # O Cloudflare termina o HTTPS; o nginx repassa X-Forwarded-Proto ao Django.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True

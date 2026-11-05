@@ -3,7 +3,8 @@
 Tudo roda com Docker num servidor só: PostgreSQL, API (gunicorn), front (nginx) e um serviço que faz backup do banco todo dia. O HTTPS fica no Cloudflare: um túnel leva `financas.rlcsolucoes.com.br` até o nginx do app, que escuta só em `127.0.0.1:PORTA` no servidor. Não precisa abrir porta nenhuma, e o app convive com os outros sistemas do servidor.
 
 ```
-https://financas.rlcsolucoes.com.br/        front
+https://financas.rlcsolucoes.com.br/        landing page
+https://financas.rlcsolucoes.com.br/app/    sistema (login em /app/entrar)
 https://financas.rlcsolucoes.com.br/api/    API
 https://financas.rlcsolucoes.com.br/admin/  admin do Django
 ```

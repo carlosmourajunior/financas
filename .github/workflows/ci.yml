@@ -63,3 +63,5 @@ jobs:
         run: docker build --target prod -t financas-frontend ./frontend
       - name: Build da imagem de produção da API
         run: docker build --target prod -t financas-backend ./backend
+      - name: Valida o compose de produção
+        run: cp .env.example .env && docker compose -f docker-compose.prod.yml config --quiet

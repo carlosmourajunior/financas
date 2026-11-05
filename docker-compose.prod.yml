@@ -1,0 +1,89 @@
+# Produção: um domínio só, com HTTPS automático pelo Caddy.
+#   https://DOMINIO/        front (nginx com o build do React)
+#   https://DOMINIO/api/    API Django (gunicorn)
+#   https://DOMINIO/admin/  admin do Django
+# Uso: docker compose -f docker-compose.prod.yml up -d --build
+# As variáveis vêm do arquivo .env ao lado deste (veja .env.example).
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: financas
+      POSTGRES_USER: financas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - dados-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U financas"]
+      interval: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      target: prod
+    restart: unless-stopped
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?defina DJANGO_SECRET_KEY no .env}
+      DJANGO_ALLOWED_HOSTS: ${DOMINIO:?defina DOMINIO no .env}
+      CORS_ALLOWED_ORIGINS: https://${DOMINIO}
+      CSRF_TRUSTED_ORIGINS: https://${DOMINIO}
+      DATABASE_URL: postgres://financas:${POSTGRES_PASSWORD}@db:5432/financas
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      DOMINIO: ${DOMINIO}
+      EMAIL_ACME: ${EMAIL_ACME:?defina EMAIL_ACME no .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dados:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+      - frontend
+
+  # Copia o banco todo dia e guarda os últimos BACKUP_DIAS dias em ./backups
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: financas
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: financas
+      BACKUP_DIAS: ${BACKUP_DIAS:-14}
+      BACKUP_HORA: ${BACKUP_HORA:-03}
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - ${BACKUP_PASTA:-./backups}:/backups
+    entrypoint: ["sh", "/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dados-db:
+  caddy-dados:
+  caddy-config:

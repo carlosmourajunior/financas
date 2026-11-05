@@ -12,6 +12,9 @@ CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 # Build de produção
 FROM base AS build
+# Em produção a API fica no mesmo domínio, em /api
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 # Produção: arquivos estáticos servidos pelo nginx

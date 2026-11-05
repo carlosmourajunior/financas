@@ -1,0 +1,88 @@
+# Produção atrás de um túnel do Cloudflare (o HTTPS fica no Cloudflare).
+# O nginx do front é a única porta, em 127.0.0.1:PORTA:
+#   /        front (build do React)
+#   /api/    API Django (gunicorn)
+#   /admin/  admin do Django
+# Uso: docker compose -f docker-compose.prod.yml up -d --build
+# As variáveis vêm do arquivo .env ao lado deste (veja .env.example).
+name: financas
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: financas
+      POSTGRES_USER: financas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - dados-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U financas"]
+      interval: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      target: prod
+    restart: unless-stopped
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?defina DJANGO_SECRET_KEY no .env}
+      DJANGO_ALLOWED_HOSTS: ${DOMINIO:?defina DOMINIO no .env}
+      CORS_ALLOWED_ORIGINS: https://${DOMINIO}
+      CSRF_TRUSTED_ORIGINS: https://${DOMINIO}
+      DATABASE_URL: postgres://financas:${POSTGRES_PASSWORD}@db:5432/financas
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    # Só escuta no próprio servidor; o túnel do Cloudflare chega por aqui.
+    ports:
+      - "127.0.0.1:${PORTA:-8099}:80"
+    depends_on:
+      - backend
+
+  # Túnel do Cloudflare dentro do compose (opcional). Só sobe com
+  #   docker compose -f docker-compose.prod.yml --profile tunel up -d
+  # No painel do túnel, o hostname público aponta para http://frontend:80
+  cloudflared:
+    image: cloudflare/cloudflared:2025.10.0
+    profiles: ["tunel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - frontend
+
+  # Copia o banco todo dia e guarda os últimos BACKUP_DIAS dias em ./backups
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: financas
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: financas
+      BACKUP_DIAS: ${BACKUP_DIAS:-14}
+      BACKUP_HORA: ${BACKUP_HORA:-03}
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./deploy/backup.sh:/backup.sh:ro
+      - ${BACKUP_PASTA:-./backups}:/backups
+    entrypoint: ["sh", "/backup.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dados-db:

@@ -101,3 +101,7 @@ docker compose -f docker-compose.prod.yml logs -f backend
 - O `.env` tem os segredos. Ele não vai para o Git (`.gitignore`).
 - Só o nginx do front escuta, e só em 127.0.0.1. O banco e a API ficam na rede interna do Docker.
 - Qualquer pessoa que abrir o site pode criar uma conta. Cada conta só vê os próprios dados.
+
+## Alertas de segurança (Telegram)
+
+O app `backend/alertas` avisa no Telegram quando um IP erra o login 5 vezes em 10 minutos (`ALERTA_FALHAS_LOGIN`) e a cada login de admin. O IP vem do `CF-Connecting-IP` do túnel. Para ativar, ponha `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` no `.env` e rode `docker compose -f docker-compose.prod.yml up -d --build backend`. Sem eles, os alertas ficam só no log.

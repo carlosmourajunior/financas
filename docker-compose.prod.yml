@@ -34,6 +34,10 @@ services:
       CORS_ALLOWED_ORIGINS: https://${DOMINIO}
       CSRF_TRUSTED_ORIGINS: https://${DOMINIO}
       DATABASE_URL: postgres://financas:${POSTGRES_PASSWORD}@db:5432/financas
+      # Alertas de segurança no Telegram (backend/alertas). Vazio = só log.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      ALERTA_ORIGEM: ${ALERTA_ORIGEM:-financas}
     depends_on:
       db:
         condition: service_healthy

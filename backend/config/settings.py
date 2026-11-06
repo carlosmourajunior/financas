@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "usuarios",
     "financas",
     "importacao",
+    "alertas",
 ]
 
 MIDDLEWARE = [

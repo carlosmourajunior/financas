@@ -2,6 +2,8 @@ import { useState, type ChangeEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Erro } from '../components/Formularios'
 import ImportarExtrato from './ImportarExtrato'
+import { BuscarFatura, EscolherOrigem } from '../components/OpenFinance'
+import { useOpenFinance, type Origem } from '../lib/openfinance'
 import Icon from '../components/Icon'
 import { Abas, Campo, Secao, Titulo, botaoPrimario, campo } from '../components/ui'
 import { api } from '../lib/api'
@@ -18,6 +20,8 @@ export default function Importar() {
   const navigate = useNavigate()
   const cad = useCadastros()
   const [fonte, setFonte] = useState<Fonte>('fatura')
+  const of = useOpenFinance()
+  const [origem, setOrigem] = useState<Origem>('arquivo')
   const [cartao, setCartao] = useState('')
   const [nomeArquivo, setNomeArquivo] = useState('')
   const [previa, setPrevia] = useState<PreviaFatura | null>(null)
@@ -87,7 +91,7 @@ export default function Importar() {
       />
 
       {fonte === 'extrato' ? (
-        <ImportarExtrato />
+        <ImportarExtrato openFinance={of} />
       ) : !cad.carregando && cad.cartoes.length === 0 ? (
         <p className="text-[17px] leading-snug text-suave">
           Para importar uma fatura, primeiro{' '}
@@ -114,14 +118,39 @@ export default function Importar() {
               ))}
             </select>
           </Campo>
-          <label className="relative flex cursor-pointer items-center gap-3.5 rounded-[14px] border-2 border-dashed border-[#9aaaa7] bg-white px-4 py-5 focus-within:outline-2 focus-within:outline-tinta">
-            <Icon name="arquivo" size={28} />
-            <span className="flex flex-col gap-0.5">
-              <span className="text-base font-bold">{lendo ? 'Lendo o arquivo…' : nomeArquivo || 'Escolher arquivo'}</span>
-              <span className="text-sm text-suave">CSV ou PDF do Nubank, PDF do Itaú ou CSV do Sicredi</span>
-            </span>
-            <input type="file" accept=".pdf,.csv" onChange={ler} disabled={lendo} className="sr-only" />
-          </label>
+          {of.ativo && (
+            <EscolherOrigem
+              valor={origem}
+              onChange={(o) => {
+                setOrigem(o)
+                setPrevia(null)
+                setErro(null)
+              }}
+            />
+          )}
+          {of.ativo && origem === 'banco' ? (
+            <BuscarFatura
+              key={cartaoEscolhido}
+              cartao={cartaoEscolhido}
+              contas={of.contas}
+              aoLer={(p, nome) => {
+                setErro(null)
+                setNomeArquivo(nome)
+                setPrevia(p)
+                setItens(p.itens)
+                setTodos(false)
+              }}
+            />
+          ) : (
+              <label className="relative flex cursor-pointer items-center gap-3.5 rounded-[14px] border-2 border-dashed border-[#9aaaa7] bg-white px-4 py-5 focus-within:outline-2 focus-within:outline-tinta">
+                <Icon name="arquivo" size={28} />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-base font-bold">{lendo ? 'Lendo o arquivo…' : nomeArquivo || 'Escolher arquivo'}</span>
+                  <span className="text-sm text-suave">CSV ou PDF do Nubank, PDF do Itaú ou CSV do Sicredi</span>
+                </span>
+                <input type="file" accept=".pdf,.csv" onChange={ler} disabled={lendo} className="sr-only" />
+              </label>
+          )}
         </>
       )}
 

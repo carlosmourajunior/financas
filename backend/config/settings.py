@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "financas",
     "importacao",
     "alertas",
+    "openfinance",
 ]
 
 MIDDLEWARE = [
@@ -136,3 +137,12 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "WARNING"},
 }
+
+
+# Open Finance pela Pluggy (opcional). Ligado só com as três primeiras preenchidas.
+# Uso pessoal com o MeuPluggy: os itens são do dono da instância, então só os e-mails
+# de PLUGGY_USUARIOS veem esses dados. Sem nada disso, o módulo some da tela.
+PLUGGY_CLIENT_ID = os.environ.get("PLUGGY_CLIENT_ID", "")
+PLUGGY_CLIENT_SECRET = os.environ.get("PLUGGY_CLIENT_SECRET", "")
+PLUGGY_ITEM_IDS = env_lista("PLUGGY_ITEM_IDS")
+PLUGGY_USUARIOS = [e.lower() for e in env_lista("PLUGGY_USUARIOS")]

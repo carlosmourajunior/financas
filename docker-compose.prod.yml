@@ -37,6 +37,10 @@ services:
       # Alertas de segurança no Telegram (backend/alertas). Vazio = só log.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      PLUGGY_CLIENT_ID: ${PLUGGY_CLIENT_ID:-}
+      PLUGGY_CLIENT_SECRET: ${PLUGGY_CLIENT_SECRET:-}
+      PLUGGY_ITEM_IDS: ${PLUGGY_ITEM_IDS:-}
+      PLUGGY_USUARIOS: ${PLUGGY_USUARIOS:-}
       ALERTA_ORIGEM: ${ALERTA_ORIGEM:-financas}
     depends_on:
       db:

@@ -6,6 +6,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from financas import views as fin
 from importacao import views as imp
+from openfinance import views as of
 from usuarios.views import CadastroView, EuView
 
 router = DefaultRouter()
@@ -31,5 +32,9 @@ urlpatterns = [
     path("api/importar/fatura/confirmar/", imp.ConfirmarFaturaView.as_view()),
     path("api/importar/extrato/", imp.PreviaExtratoView.as_view()),
     path("api/importar/extrato/confirmar/", imp.ConfirmarExtratoView.as_view()),
+    path("api/openfinance/", of.EstadoView.as_view()),
+    path("api/openfinance/faturas/", of.FaturasView.as_view()),
+    path("api/openfinance/fatura/", of.PreviaFaturaView.as_view()),
+    path("api/openfinance/extrato/", of.PreviaExtratoView.as_view()),
     path("api/", include(router.urls)),
 ]

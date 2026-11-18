@@ -464,6 +464,13 @@ class ContasTests(ApiBase):
         nomes = [c["nome"] for c in self.client.get("/api/contas/visao-geral/").data["contas"]]
         self.assertNotIn("Alheia", nomes)
 
+    def test_visao_geral_ignora_cartao_desativado(self):
+        self.cartao.ativo = False
+        self.cartao.save()
+        r = self.client.get("/api/contas/visao-geral/")
+        self.assertEqual(r.data["cartoes"], [])
+        self.assertEqual(r.data["faturas_a_pagar"], 0)
+
     def test_visao_geral_sem_poupanca(self):
         r = self.client.get("/api/contas/visao-geral/?sem_poupanca=1")
         self.assertEqual([c["nome"] for c in r.data["contas"]], ["Corrente"])

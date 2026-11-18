@@ -580,7 +580,7 @@ def visao_geral(dono, hoje: date, mes: date | None = None, sem_poupanca: bool = 
     faturas_pagas = _soma(PagamentoFatura.objects.filter(dono=dono))
 
     cartoes = []
-    for c in Cartao.objects.filter(dono=dono).select_related("vinculo_pluggy"):
+    for c in Cartao.objects.filter(dono=dono, ativo=True).select_related("vinculo_pluggy"):
         f = fatura_atual(c, hoje)
         paga = PagamentoFatura.objects.filter(cartao=c, fecha=f.fecha).exists()
         cartoes.append(

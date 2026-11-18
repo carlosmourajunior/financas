@@ -452,3 +452,16 @@ class TotalDoBancoTests(APITestCase):
         transacoes = [{**t, "creditCardMetadata": {**t["creditCardMetadata"], "billId": "f"}} for t in TRANSACOES_CARTAO[:3]]
         lida = conversao.fatura_aberta("Nubank", "", {"f"}, date(2026, 10, 9), date(2026, 11, 8), date(2026, 11, 15), transacoes, [fatura])
         self.assertEqual([(i.descricao[:8], i.valor) for i in lida.itens], [("Previsto", 5_000)])
+
+    def test_proxima_parcela_no_dia_do_fechamento_fica_para_a_seguinte(self):
+        def parcela(desc, valor, k, data):
+            return {"id": f"{desc}{k}", "description": desc, "amount": valor, "date": data, "status": "POSTED",
+                    "creditCardMetadata": {"installmentNumber": k, "totalInstallments": 10, "billId": None}}
+        transacoes = [
+            {"id": "x", "description": "Antiga", "amount": 10, "date": "2026-11-01", "creditCardMetadata": {"billId": "f"}},
+            parcela("FEHEROSSH", 106.31, 1, "2026-11-20"),
+            parcela("FEHEROSSH LTDA", 106.33, 2, "2026-12-05"),
+            parcela("OUTRA LOJA", 106.31, 2, "2026-12-05"),
+        ]
+        lida = conversao.fatura_aberta("MP", "", {"f"}, date(2026, 11, 6), date(2026, 12, 5), date(2026, 12, 10), transacoes)
+        self.assertEqual(sorted((i.descricao, i.parcela_atual) for i in lida.itens), [("FEHEROSSH", 1), ("OUTRA LOJA", 2)])

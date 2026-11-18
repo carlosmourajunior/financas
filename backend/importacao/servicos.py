@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from django.db import transaction
 
 from financas.models import Cartao, Categoria, Lancamento, Natureza
-from financas.servicos import Fatura, _vencimento, fatura_que_fecha_em, somar_meses
+from financas.servicos import Fatura, _vencimento, fatura_que_fecha_em, fecha_do_mes, somar_meses
 
 from .leitores import FaturaLida, Item, Tipo
 from .leitores.base import normalizar, sem_acento
@@ -47,15 +47,15 @@ IMPORTAVEIS = (Tipo.COMPRA, Tipo.ENCARGO, Tipo.CREDITO)
 def ciclo_da_fatura(cartao: Cartao, lida: FaturaLida) -> Fatura:
     """A fatura do app que corresponde à do arquivo, pelo vencimento ou pelas compras."""
     if lida.vencimento:
-        candidatas = [somar_meses(lida.vencimento, -m, cartao.dia_fechamento) for m in range(0, 3)]
+        candidatas = [fecha_do_mes(cartao, lida.vencimento, -m) for m in range(0, 3)]
         fecha = min(candidatas, key=lambda f: abs((_vencimento(cartao, f) - lida.vencimento).days))
     else:
         # Sem vencimento no arquivo: o ciclo que contém a compra mais recente sem parcela.
         datas = [i.data for i in lida.itens if i.tipo == Tipo.COMPRA and not i.parcela_total] or [i.data for i in lida.itens]
         ultima = max(datas)
-        fecha = date(ultima.year, ultima.month, cartao.dia_fechamento)
+        fecha = fecha_do_mes(cartao, ultima)
         if ultima > fecha:
-            fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
+            fecha = fecha_do_mes(cartao, fecha, 1)
     return fatura_que_fecha_em(cartao, fecha)
 
 

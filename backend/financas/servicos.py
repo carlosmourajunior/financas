@@ -495,6 +495,7 @@ def resumo(dono, hoje: date) -> dict:
     }
 
 
+<<<<<<< HEAD
 # Contas -------------------------------------------------------------------
 
 
@@ -611,3 +612,55 @@ def visao_geral(dono, hoje: date, mes: date | None = None) -> dict:
         "mes": _no_mes(qs, mes, fim),
         "movimentos": [_movimento(l) for l in qs.filter(data__gte=mes, data__lte=fim).select_related("categoria", "conta").order_by("-data", "-id")],
     }
+=======
+@transaction.atomic
+def repetir_lancamento(lanc: Lancamento, tipo: str, *, frequencia: str = Frequencia.MENSAL, parcela_atual: int = 1, parcela_total: int = 1) -> int:
+    """Um lançamento único (vindo do banco, por exemplo) passa a recorrente ou a parcela k de n.
+
+    Recorrente: vira a primeira ocorrência e as próximas aparecem nos meses seguintes.
+    Parcelada: as parcelas que faltam são criadas mês a mês, como previsão. Devolve quantas criou.
+    """
+    hoje = date.today()
+    if tipo == Lancamento.Tipo.RECORRENTE:
+        rec = Recorrencia.objects.create(
+            dono=lanc.dono,
+            descricao=lanc.descricao,
+            valor=lanc.valor,
+            natureza=lanc.natureza,
+            categoria=lanc.categoria,
+            conta=lanc.conta,
+            cartao=lanc.cartao,
+            frequencia=frequencia,
+            inicio=lanc.data,
+            gerada_ate=lanc.data,
+        )
+        lanc.tipo, lanc.recorrencia = Lancamento.Tipo.RECORRENTE, rec
+        lanc.save(update_fields=["tipo", "recorrencia", "atualizado_em"])
+        return gerar_ocorrencias(lanc.dono, fim_do_mes(somar_meses(hoje, 1)))
+
+    grupo = Lancamento.novo_grupo()
+    lanc.tipo, lanc.grupo, lanc.parcela_atual, lanc.parcela_total = Lancamento.Tipo.PARCELADA, grupo, parcela_atual, parcela_total
+    lanc.save(update_fields=["tipo", "grupo", "parcela_atual", "parcela_total", "atualizado_em"])
+    seguintes = []
+    for k in range(parcela_atual + 1, parcela_total + 1):
+        data = somar_meses(lanc.data, k - parcela_atual)
+        seguintes.append(
+            Lancamento(
+                dono=lanc.dono,
+                descricao=lanc.descricao,
+                valor=lanc.valor,
+                natureza=lanc.natureza,
+                data=data,
+                categoria=lanc.categoria,
+                conta=lanc.conta,
+                cartao=lanc.cartao,
+                tipo=Lancamento.Tipo.PARCELADA,
+                grupo=grupo,
+                parcela_atual=k,
+                parcela_total=parcela_total,
+                pago=data <= hoje,
+            )
+        )
+    Lancamento.objects.bulk_create(seguintes)
+    return len(seguintes)
+>>>>>>> c96d9557cc666c911b1c21932e55ae9682630f35

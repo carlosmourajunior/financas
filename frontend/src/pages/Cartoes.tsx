@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
 import { FormCartao } from '../components/Formularios'
-import { TrazerDoBanco } from '../components/OpenFinance'
+import { ConferirDatas, TrazerDoBanco } from '../components/OpenFinance'
+import { useOpenFinance } from '../lib/openfinance'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Abas, Barra, Secao, Segmentos, Titulo, botaoSecundario } from '../components/ui'
@@ -27,6 +28,7 @@ export default function Cartoes() {
   const sel = busca.get('cartao') ?? ''
   const fecha = busca.get('fecha')
   const [novo, setNovo] = useState(false)
+  const of = useOpenFinance()
   const [soSemCategoria, setSoSemCategoria] = useState(false)
   const categorias = useCadastros().categorias.filter((x) => x.natureza === 'despesa')
   const c = cartoes.find((x) => String(x.id) === sel) ?? cartoes[0]
@@ -78,8 +80,8 @@ export default function Cartoes() {
         <div className="flex max-w-xl flex-col gap-4">
           <TrazerDoBanco
             aoTrazer={() => {
-              setNovo(false)
               lista.recarregar()
+              of.recarregar()
             }}
           />
           <FormCartao aoSalvar={salvo} />
@@ -99,6 +101,18 @@ export default function Cartoes() {
         valor={String(c.id)}
         onChange={setSel}
       />
+
+      {of.contas.some((x) => x.cartao === c.id && x.conferir_datas) && (
+        <ConferirDatas
+          key={c.id}
+          cartao={c}
+          aoSalvar={() => {
+            of.recarregar()
+            lista.recarregar()
+            detalhe.recarregar()
+          }}
+        />
+      )}
 
       {detalhe.erro && <p className="py-10 text-center text-suave">Não foi possível carregar o cartão. {detalhe.erro}</p>}
       {!d && !detalhe.erro && <p className="py-10 text-center text-suave">Carregando…</p>}

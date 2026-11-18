@@ -199,7 +199,7 @@ class TrazerContasTests(APITestCase):
     def test_cria_conta_e_cartao_e_nao_repete(self, _):
         r = self.client.post("/api/openfinance/trazer-contas/")
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(r.json(), {"contas": ["Nubank"], "cartoes": ["Nubank Platinum 5555"]})
+        self.assertEqual(r.json(), {"contas": ["Nubank"], "cartoes": ["Nubank Platinum 5555"], "renomeadas": [], "conferir_datas": []})
         conta = Conta.objects.get(dono=self.usuario)
         self.assertEqual((conta.saldo_inicial, conta.tipo), (152_035, "corrente"))
         cartao = Cartao.objects.get(dono=self.usuario)
@@ -210,7 +210,7 @@ class TrazerContasTests(APITestCase):
         self.assertEqual([(c["conta"], c["cartao"]) for c in estado], [(conta.id, None), (None, cartao.id)])
 
         r = self.client.post("/api/openfinance/trazer-contas/")
-        self.assertEqual(r.json(), {"contas": [], "cartoes": []})
+        self.assertEqual(r.json(), {"contas": [], "cartoes": [], "renomeadas": [], "conferir_datas": []})
         self.assertEqual(Conta.objects.filter(dono=self.usuario).count(), 1)
 
     def test_conta_ja_ligada_a_mao_nao_duplica(self, _):
@@ -247,3 +247,141 @@ class NomeDoBancoTests(APITestCase):
         self.assertEqual(pluggy.nome_com_banco(C("3", "CREDIT", "Nubank Ultravioleta", "", 0, banco="Nubank"), "Cartão"), "Nubank Ultravioleta")
         # Sem conta corrente no item, a bandeira identifica o cartão.
         self.assertEqual(pluggy.nome_com_banco(C("4", "CREDIT", "platinum", "", 0, banco="Mastercard"), "Cartão"), "Mastercard Platinum")
+
+
+# Como vieram as contas reais: BB com três contas de mesmo nome e cartões sem datas; Itaú com fatura.
+CONTAS_REAIS = {
+    "item-bb": [
+        {"id": "bb1", "type": "BANK", "subtype": "CHECKING_ACCOUNT", "name": "BANCO DO BRASIL S/A", "number": "12345-6", "balance": 10,
+         "bankData": {"transferNumber": "001/1234/12345-6"}},
+        {"id": "bb2", "type": "BANK", "subtype": "CHECKING_ACCOUNT", "name": "BANCO DO BRASIL S/A", "number": "98765-4", "balance": 0},
+        {"id": "bb3", "type": "BANK", "subtype": "SAVINGS_ACCOUNT", "name": "BANCO DO BRASIL S/A", "number": "555-1", "balance": 0},
+        {"id": "bbc1", "type": "CREDIT", "subtype": "CREDIT_CARD", "name": "OUROCARD PLATINUM VISA", "number": "5085", "balance": 0, "creditData": {}},
+        {"id": "bbc2", "type": "CREDIT", "subtype": "CREDIT_CARD", "name": "OUROCARD PLATINUM VISA", "number": "0099", "balance": 0, "creditData": {}},
+    ],
+    "item-itau": [
+        {"id": "it1", "type": "BANK", "subtype": "CHECKING_ACCOUNT", "name": "Itau", "number": "1", "balance": 0},
+        {"id": "itc1", "type": "CREDIT", "subtype": "CREDIT_CARD", "name": "AZUL ITAU VISA INFINITE", "number": "4321", "balance": 0, "creditData": {}},
+    ],
+}
+
+
+def api_real(caminho, **params):
+    if caminho == "/accounts":
+        return {"results": CONTAS_REAIS[params["itemId"]]}
+    if caminho.startswith("/items/"):
+        return {"connector": {"name": "MeuPluggy"}}
+    if caminho == "/bills":
+        faturas = {"itc1": [{"id": "f1", "dueDate": "2026-11-03T00:00:00Z", "billClosingDate": "2026-10-24T00:00:00Z"}]}
+        return {"results": faturas.get(params["accountId"], []), "totalPages": 1}
+    raise AssertionError(caminho)
+
+
+@override_settings(**{**LIGADO, "PLUGGY_ITEM_IDS": ["item-bb", "item-itau"]})
+@patch("openfinance.pluggy._get", side_effect=api_real)
+class ContasReaisTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.usuario = Usuario.objects.create_user(email="eu@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(self.usuario)
+
+    def test_nomes_e_datas(self, _):
+        r = self.client.post("/api/openfinance/trazer-contas/").json()
+        self.assertEqual(r["contas"], ["Banco do Brasil 12345-6", "Banco do Brasil 98765-4", "Banco do Brasil Poupança", "Itaú"])
+        self.assertEqual(r["cartoes"], ["Banco do Brasil Ourocard Platinum Visa 5085", "Banco do Brasil Ourocard Platinum Visa 0099", "Itaú Azul Visa Infinite 4321"])
+        # O Itaú tirou as datas da última fatura; o BB não informou nenhuma: não inventa, pede para conferir.
+        azul = Cartao.objects.get(final="4321")
+        self.assertEqual((azul.dia_fechamento, azul.dia_vencimento), (24, 3))
+        self.assertEqual(len(r["conferir_datas"]), 2)
+        estado = {c["id"]: c for c in self.client.get("/api/openfinance/").json()["contas"]}
+        self.assertTrue(estado["bbc1"]["conferir_datas"])
+        self.assertFalse(estado["itc1"]["conferir_datas"])
+
+        ouro = Cartao.objects.get(final="5085")
+        resp = self.client.post("/api/openfinance/datas-conferidas/", {"cartao": ouro.id, "dia_fechamento": 5, "dia_vencimento": 12}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        ouro.refresh_from_db()
+        self.assertEqual((ouro.dia_fechamento, ouro.dia_vencimento), (5, 12))
+        self.assertFalse(Vinculo.objects.get(cartao=ouro).conferir_datas)
+
+    def test_melhora_o_que_a_versao_anterior_criou(self, _):
+        # Como ficou na versão anterior: nome cru ou banco repetido, dias inventados, sem nome_dado.
+        conta = Conta.objects.create(dono=self.usuario, nome="Itaú Itau")
+        Vinculo.objects.create(dono=self.usuario, conta=conta, pluggy_conta="it1")
+        bb = Conta.objects.create(dono=self.usuario, nome="BANCO DO BRASIL S/A")
+        Vinculo.objects.create(dono=self.usuario, conta=bb, pluggy_conta="bb1")
+        azul = Cartao.objects.create(dono=self.usuario, nome="Itaú AZUL ITAU VISA INFINITE", limite=1, dia_fechamento=3, dia_vencimento=10)
+        Vinculo.objects.create(dono=self.usuario, cartao=azul, pluggy_conta="itc1")
+        ouro = Cartao.objects.create(dono=self.usuario, nome="Banco do Brasil OUROCARD PLATINUM VISA", limite=1, dia_fechamento=3, dia_vencimento=10)
+        Vinculo.objects.create(dono=self.usuario, cartao=ouro, pluggy_conta="bbc1")
+
+        r = self.client.post("/api/openfinance/trazer-contas/").json()
+        for obj in (conta, bb, azul, ouro):
+            obj.refresh_from_db()
+        self.assertEqual((conta.nome, bb.nome), ("Itaú", "Banco do Brasil 12345-6"))
+        self.assertEqual((azul.nome, azul.final, azul.dia_fechamento, azul.dia_vencimento), ("Itaú Azul Visa Infinite", "4321", 24, 3))
+        self.assertEqual((ouro.nome, ouro.final), ("Banco do Brasil Ourocard Platinum Visa", "5085"))
+        self.assertTrue(Vinculo.objects.get(cartao=ouro).conferir_datas)
+        self.assertEqual(len(r["renomeadas"]), 4)
+        # Renomeado pelo usuário depois: fica.
+        conta.nome = "Conta salário"
+        conta.save()
+        self.client.post("/api/openfinance/trazer-contas/")
+        conta.refresh_from_db()
+        self.assertEqual(conta.nome, "Conta salário")
+
+
+@override_settings(**LIGADO)
+@patch("openfinance.pluggy._get", side_effect=api_falsa)
+class ImportarRecentesTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.usuario = Usuario.objects.create_user(email="eu@exemplo.com", password="senha-forte-123")
+        criar_categorias_padrao(self.usuario)
+        self.client.force_authenticate(self.usuario)
+        with patch("openfinance.pluggy._get", side_effect=api_falsa):
+            self.client.post("/api/openfinance/trazer-contas/")
+        self.conta = Conta.objects.get(dono=self.usuario)
+        self.cartao = Cartao.objects.get(dono=self.usuario)
+
+    def importar(self):
+        import sys
+
+        modulo = sys.modules[__name__]
+        pagamento = tx("m4", "2026-11-06", "Pagamento de fatura", 450.9)
+        with patch.object(modulo, "TRANSACOES_CONTA", TRANSACOES_CONTA + [pagamento]), patch("openfinance.views.date") as d:
+            d.today.return_value = date(2026, 11, 12)
+            d.fromisoformat = date.fromisoformat
+            return self.client.post("/api/openfinance/importar-recentes/", {"dias": 60}, format="json")
+
+    def test_cartao_fica_no_cartao_e_conta_vira_lancamento(self, _):
+        r = self.importar()
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["pulados"], [])
+        # Fatura de outubro: 2 únicas + parcela 3/10 e as 7 previstas. A de novembro (padaria) vem do
+        # banco e substitui a previsão da 4/10 naquele ciclo, que o banco real traria junto.
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 10)
+        self.assertTrue(Lancamento.objects.filter(cartao=self.cartao, descricao="Padaria do Zé").exists())
+        em_conta = Lancamento.objects.filter(conta=self.conta).order_by("data")
+        self.assertEqual([(l.descricao, l.natureza) for l in em_conta], [("Maria Exemplo", "despesa"), ("Empresa X", "receita")])
+        # O pagamento da fatura marca a fatura como paga, não vira despesa (seria contar duas vezes).
+        from financas.models import PagamentoFatura
+
+        self.assertTrue(PagamentoFatura.objects.filter(cartao=self.cartao, valor=45_090).exists())
+        # O saldo de hoje continua o do banco.
+        self.conta.refresh_from_db()
+        self.assertEqual(self.conta.saldo_inicial + 100_000 - 8_590 - 45_090, 152_035)
+
+        # De novo: nada duplica.
+        self.importar()
+        self.assertEqual(Lancamento.objects.filter(conta=self.conta).count(), 2)
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 10)
+        saldo = self.conta.saldo_inicial
+        self.conta.refresh_from_db()
+        self.assertEqual(self.conta.saldo_inicial, saldo)
+
+    def test_cartao_sem_datas_fica_de_fora(self, _):
+        Vinculo.objects.filter(cartao=self.cartao).update(conferir_datas=True)
+        r = self.importar().json()
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 0)
+        self.assertEqual(len(r["pulados"]), 1)

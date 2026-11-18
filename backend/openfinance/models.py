@@ -9,6 +9,10 @@ class Vinculo(DoUsuario):
     conta = models.OneToOneField(Conta, null=True, blank=True, on_delete=models.CASCADE, related_name="vinculo_pluggy")
     cartao = models.OneToOneField(Cartao, null=True, blank=True, on_delete=models.CASCADE, related_name="vinculo_pluggy")
     pluggy_conta = models.CharField(max_length=64)
+    # O nome que o app deu ao trazer do banco: se o usuário não mudou, o app pode melhorar depois.
+    nome_dado = models.CharField(max_length=80, blank=True, default="")
+    # Cartão trazido sem dia de fechamento ou de vencimento: o usuário precisa conferir.
+    conferir_datas = models.BooleanField(default=False)
 
     class Meta:
         constraints = [

@@ -133,6 +133,7 @@ class ContaPluggy:
     numero: str
     saldo: int
     subtipo: str = ""
+    item: str = ""
     banco: str = ""  # nome do banco, para quem tem cartão ou conta em mais de um
     limite: int = 0  # cartão: limite total
     vencimento: date | None = None  # cartão: vencimento da fatura atual
@@ -165,6 +166,7 @@ def contas() -> list[ContaPluggy]:
                     numero=a.get("number") or "",
                     saldo=centavos(a.get("balance")),
                     subtipo=a.get("subtype") or "",
+                    item=item,
                     banco=banco or (credito.get("brand") or "").title(),
                     limite=centavos(credito.get("creditLimit")),
                     vencimento=_data(credito.get("balanceDueDate")),
@@ -174,21 +176,75 @@ def contas() -> list[ContaPluggy]:
     return resultado
 
 
-_RAZAO_SOCIAL = re.compile(r"\b(s\.?\s?a\.?|ltda|instituic[aã]o de pagamento|banco m[uú]ltiplo|cooperativa)\b", re.I)
+_RAZAO_SOCIAL = re.compile(
+    r"\b(s\s*/\s*a|s\.?\s?a\.?|ltda|instituic[aã]o de pagamento|banco m[uú]ltiplo|cooperativa|sociedade de cr[eé]dito)(?=\W|$)", re.I
+)
+_PEQUENAS = {"de", "do", "da", "dos", "das", "e"}
+# Palavras do nome que já são o banco: "AZUL ITAU VISA INFINITE" do Itaú vira "Itaú Azul Visa Infinite".
+_PALAVRAS_DO_BANCO = {"Nubank": {"nubank", "nu"}, "Itaú": {"itau", "unibanco"}, "C6 Bank": {"c6"}, "BTG Pactual": {"btg", "pactual"}}
+
+
+def _normal(texto: str) -> str:
+    from importacao.leitores.base import normalizar
+
+    return normalizar(texto)
+
+
+def titulo(texto: str) -> str:
+    """'OUROCARD PLATINUM VISA' e 'platinum' em 'Ourocard Platinum Visa' e 'Platinum'. Misturado fica como veio."""
+    if not (texto.isupper() or texto.islower()):
+        return texto
+    palavras = texto.lower().split()
+    return " ".join(p if i and p in _PEQUENAS else p[:1].upper() + p[1:] for i, p in enumerate(palavras))
+
+
+def _sem_o_banco(nome: str, banco: str) -> str:
+    chaves = _PALAVRAS_DO_BANCO.get(banco) or {w for w in _normal(banco).split() if w not in _PEQUENAS and w != "banco"}
+    frase = _normal(banco)
+    resto = [p for p in nome.split() if _normal(p) not in chaves and _normal(p) not in _PEQUENAS | {"banco"}]
+    # Só tira as palavras quando o banco aparece no nome; "Conta Azul" de outro banco fica inteira.
+    if not (frase in _normal(nome) or any(_normal(p) in chaves for p in nome.split())):
+        return nome
+    return " ".join(resto)
 
 
 def nome_com_banco(c: "ContaPluggy", padrao: str) -> str:
-    """'platinum' do Nubank vira 'Nubank Platinum'; a conta 'Nu Pagamentos S.A. - ...' vira 'Nubank'."""
-    nome = c.nome.strip()
-    if c.banco and (not nome or _RAZAO_SOCIAL.search(nome)):
-        # Nome jurídico da instituição: fica só o banco (e o tipo, se for poupança).
-        return f"{c.banco} Poupança" if c.subtipo == "SAVINGS_ACCOUNT" else c.banco
+    """O banco na frente, sem razão social nem banco repetido.
+
+    'platinum' do Nubank vira 'Nubank Platinum'; 'Nu Pagamentos S.A. - ...' e 'BANCO DO BRASIL S/A'
+    viram 'Nubank' e 'Banco do Brasil'; 'Mercado Pago (Conta Pré-paga)' vira 'Mercado Pago'.
+    """
+    nome = re.sub(r"\s*\([^)]*\)\s*$", "", c.nome.strip()) if c.tipo == "BANK" else c.nome.strip()
+    if c.banco and _RAZAO_SOCIAL.search(nome):
+        nome = ""
+    nome = titulo(nome)
+    if c.banco:
+        nome = f"{c.banco} {_sem_o_banco(nome, c.banco)}".strip()
     nome = nome or padrao
-    if nome.islower():
-        nome = nome.title()
-    if c.banco and c.banco.lower() not in nome.lower():
-        return f"{c.banco} {nome}"
+    if c.tipo == "BANK" and c.subtipo == "SAVINGS_ACCOUNT" and "poupan" not in nome.lower():
+        nome = f"{nome} Poupança"
     return nome
+
+
+def final_do_cartao(numero: str) -> str:
+    digitos = re.sub(r"\D", "", numero or "")
+    return digitos[-4:] if len(digitos) >= 4 else ""
+
+
+def nomes(contas_: list["ContaPluggy"]) -> dict[str, str]:
+    """Nome de cada conta no app. Iguais ganham o número no fim (cartões se separam pelo final)."""
+    base = {c.id: nome_com_banco(c, "Cartão" if c.tipo == "CREDIT" else "Conta") for c in contas_}
+    contagem: dict[tuple, int] = {}
+    for c in contas_:
+        contagem[(c.tipo, base[c.id])] = contagem.get((c.tipo, base[c.id]), 0) + 1
+    resultado = {}
+    for c in contas_:
+        nome, limite = base[c.id], 40 if c.tipo == "CREDIT" else 80
+        if contagem[(c.tipo, nome)] > 1 and c.tipo == "BANK" and c.numero:
+            sufixo = f" {c.numero.strip()[-12:]}"
+            nome = nome[: limite - len(sufixo)] + sufixo
+        resultado[c.id] = nome[:limite]
+    return resultado
 
 
 def conta(conta_id: str) -> ContaPluggy | None:

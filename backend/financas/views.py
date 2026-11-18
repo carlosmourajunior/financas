@@ -1,12 +1,12 @@
 from datetime import date
 
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Cartao, Categoria, Conta, Emprestimo, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
+from .models import Cartao, Categoria, Conta, Emprestimo, Frequencia, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
 from .serializers import (
     CartaoSerializer,
     CategoriaSerializer,
@@ -17,7 +17,7 @@ from .serializers import (
     PagamentoFaturaSerializer,
     RecorrenciaSerializer,
 )
-from .servicos import detalhe_cartao, detalhe_conta, faturas_do_mes, fim_do_mes, gerar_ocorrencias, resumo, visao_geral
+from .servicos import detalhe_cartao, detalhe_conta, faturas_do_mes, fim_do_mes, gerar_ocorrencias, repetir_lancamento, resumo, visao_geral
 
 
 def ler_mes(valor: str | None) -> date | None:
@@ -84,6 +84,22 @@ class RecorrenciaViewSet(DoUsuarioViewSet):
     http_method_names = ["get", "patch", "delete", "head", "options"]
 
 
+class RepetirSerializer(serializers.Serializer):
+    tipo = serializers.ChoiceField(choices=[Lancamento.Tipo.RECORRENTE, Lancamento.Tipo.PARCELADA])
+    frequencia = serializers.ChoiceField(choices=Frequencia.choices, default=Frequencia.MENSAL)
+    parcela_atual = serializers.IntegerField(min_value=1, max_value=99, default=1)
+    parcela_total = serializers.IntegerField(min_value=1, max_value=99, default=1)
+
+    def validate(self, dados):
+        if dados["tipo"] == Lancamento.Tipo.PARCELADA:
+            if dados["parcela_total"] < 2 or dados["parcela_atual"] > dados["parcela_total"]:
+                raise serializers.ValidationError({"parcela_total": "Informe a parcela e o total, por exemplo 3 de 10."})
+        else:
+            dados.pop("parcela_atual")
+            dados.pop("parcela_total")
+        return dados
+
+
 class LancamentoViewSet(DoUsuarioViewSet):
     model = Lancamento
     serializer_class = LancamentoSerializer
@@ -106,6 +122,19 @@ class LancamentoViewSet(DoUsuarioViewSet):
             Lancamento.objects.filter(dono=instance.dono, grupo=instance.grupo, data__gte=instance.data).delete()
         else:
             instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def repetir(self, request, pk=None):
+        """Marca um lançamento único como recorrente ({"tipo": "recorrente", "frequencia"}) ou como
+        parcela ({"tipo": "parcelada", "parcela_atual", "parcela_total"})."""
+        lanc = self.get_object()
+        if lanc.tipo != Lancamento.Tipo.UNICA:
+            raise ValidationError("Só um lançamento único pode virar recorrente ou parcelado.")
+        s = RepetirSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        criados = repetir_lancamento(lanc, **s.validated_data)
+        lanc.refresh_from_db()
+        return Response({"lancamento": LancamentoSerializer(lanc, context={"request": request}).data, "criados": criados})
 
     def get_queryset(self):
         qs = super().get_queryset().select_related("categoria", "conta", "cartao")

@@ -9,6 +9,7 @@ export interface ContaPluggy {
   saldo: number
   conta: number | null
   cartao: number | null
+  conferir_datas: boolean
 }
 
 export interface EstadoOpenFinance {
@@ -25,6 +26,8 @@ export interface FaturaPluggy {
 export interface ContasTrazidas {
   contas: string[]
   cartoes: string[]
+  renomeadas: string[]
+  conferir_datas: string[]
 }
 
 export type Origem = 'arquivo' | 'banco'
@@ -32,5 +35,5 @@ export type Origem = 'arquivo' | 'banco'
 /** Se o Open Finance está ligado. Falha na consulta conta como desligado: a importação por arquivo continua. */
 export function useOpenFinance() {
   const r = useApi<EstadoOpenFinance>('/openfinance/')
-  return { ativo: Boolean(r.dados?.ativo), contas: r.dados?.contas ?? [], erro: r.erro }
+  return { ativo: Boolean(r.dados?.ativo), contas: r.dados?.contas ?? [], erro: r.erro, recarregar: r.recarregar }
 }

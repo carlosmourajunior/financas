@@ -208,8 +208,13 @@ export function TrazerDoBanco({ automatico = false, aoTrazer }: { automatico?: b
     setTrazendo(true)
     try {
       const r = await api<ContasTrazidas>('/openfinance/trazer-contas/', { method: 'POST' })
+      // Primeiro acesso: já traz os últimos meses, para o app não abrir vazio.
+      if (automatico && (r.contas.length || r.cartoes.length)) await api('/openfinance/importar-recentes/', { method: 'POST', body: { dias: 60 } })
       const nomes = [...r.contas, ...r.cartoes]
-      setAviso(nomes.length ? `Trouxemos do banco: ${nomes.join(', ')}.` : 'Tudo o que está conectado no banco já está aqui.')
+      const partes = [nomes.length ? `Trouxemos do banco: ${nomes.join(', ')}.` : 'Tudo o que está conectado no banco já está aqui.']
+      if (r.renomeadas.length) partes.push(`Nomes acertados: ${r.renomeadas.join(', ')}.`)
+      if (r.conferir_datas.length) partes.push(`Confira o fechamento e o vencimento de: ${r.conferir_datas.join(', ')}. O banco não informou.`)
+      setAviso(partes.join(' '))
       aoTrazer(r)
     } catch (err) {
       setErro((err as Error).message || 'Não foi possível trazer as contas do banco.')
@@ -236,5 +241,133 @@ export function TrazerDoBanco({ automatico = false, aoTrazer }: { automatico?: b
       {aviso && <p className="text-[15px] font-semibold text-musgo">{aviso}</p>}
       {erro && <Erro>{erro}</Erro>}
     </div>
+  )
+}
+
+const DIAS_DO_MES = Array.from({ length: 28 }, (_, i) => i + 1)
+
+/** O banco não informou fechamento e vencimento: pede os dias no lugar de inventar. */
+export function ConferirDatas({ cartao, aoSalvar }: { cartao: { id: number; dia_fechamento: number; dia_vencimento: number }; aoSalvar: () => void }) {
+  const [fecha, setFecha] = useState(cartao.dia_fechamento)
+  const [vence, setVence] = useState(cartao.dia_vencimento)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  async function salvar() {
+    setErro(null)
+    setSalvando(true)
+    try {
+      await api('/openfinance/datas-conferidas/', { method: 'POST', body: { cartao: cartao.id, dia_fechamento: fecha, dia_vencimento: vence } })
+      aoSalvar()
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível salvar.')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-l-4 border-ambar bg-white py-3 pl-4 pr-3">
+      <p className="text-[15px] font-semibold leading-snug text-ambar-texto">
+        O banco não informou o fechamento e o vencimento deste cartão. Confira na fatura e acerte os dias.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Campo label="Fecha no dia">
+          <select value={fecha} onChange={(e) => setFecha(Number(e.target.value))} className={campo}>
+            {DIAS_DO_MES.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        <Campo label="Vence no dia">
+          <select value={vence} onChange={(e) => setVence(Number(e.target.value))} className={campo}>
+            {DIAS_DO_MES.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </Campo>
+      </div>
+      {erro && <Erro>{erro}</Erro>}
+      <button onClick={salvar} disabled={salvando} className={`${botaoSecundario} disabled:opacity-60`}>
+        {salvando ? 'Salvando…' : 'Salvar os dias'}
+      </button>
+    </div>
+  )
+}
+
+interface Importados {
+  lancamentos_cartao: number
+  faturas: number
+  movimentos: number
+  pulados: string[]
+}
+
+/** Traz de uma vez os últimos dias de todas as contas e cartões ligados, sem revisar linha a linha. */
+export function ImportarRecentes() {
+  const of = useOpenFinance()
+  const [dias, setDias] = useState(60)
+  const [poupancas, setPoupancas] = useState(false)
+  const [rodando, setRodando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [r, setR] = useState<Importados | null>(null)
+
+  if (!of.ativo || !of.contas.some((c) => c.conta || c.cartao)) return null
+
+  async function importar() {
+    setErro(null)
+    setR(null)
+    setRodando(true)
+    try {
+      setR(await api<Importados>('/openfinance/importar-recentes/', { method: 'POST', body: { dias, poupancas } }))
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível importar.')
+    } finally {
+      setRodando(false)
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3 border-b border-linha pb-5">
+      <h2 className="text-lg font-bold">Tudo do banco de uma vez</h2>
+      <p className="text-[15px] leading-snug text-suave">
+        Contas viram lançamentos, que você categoriza depois. Compras do cartão ficam no cartão, e em Lançamentos aparece só a fatura. O que já
+        foi importado não se repete.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <Campo label="Período">
+          <select value={dias} onChange={(e) => setDias(Number(e.target.value))} className={campo}>
+            <option value={30}>Últimos 30 dias</option>
+            <option value={60}>Últimos 60 dias</option>
+            <option value={90}>Últimos 90 dias</option>
+            <option value={180}>Últimos 6 meses</option>
+          </select>
+        </Campo>
+        <label className="flex min-h-[50px] cursor-pointer items-center gap-2 text-[15px] font-semibold">
+          <input type="checkbox" checked={poupancas} onChange={(e) => setPoupancas(e.target.checked)} className="size-5 accent-tinta" />
+          Incluir poupanças
+        </label>
+      </div>
+      <button onClick={importar} disabled={rodando} className={`${botaoPrimario} disabled:opacity-60`}>
+        <Icon name="buscar" size={20} />
+        {rodando ? 'Importando do banco…' : 'Importar do banco'}
+      </button>
+      {erro && <Erro>{erro}</Erro>}
+      {r && (
+        <div className="flex flex-col gap-1 text-[15px]">
+          <p className="font-semibold text-musgo">
+            {r.movimentos} movimentos das contas e {r.lancamentos_cartao} lançamentos em {r.faturas} faturas de cartão.
+          </p>
+          {r.pulados.map((p) => (
+            <p key={p} className="text-ambar-texto">
+              {p}
+            </p>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

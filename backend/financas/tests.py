@@ -417,6 +417,7 @@ class EmprestimoParcelasPagasTests(ApiBase):
         self.assertEqual(resumo(self.usuario, date.today())["saldo_em_conta"], antes)
 
 
+<<<<<<< HEAD
 class ContasTests(ApiBase):
     def setUp(self):
         super().setUp()
@@ -463,3 +464,41 @@ class ContasTests(ApiBase):
         self.assertEqual(self.client.get(f"/api/contas/{alheia.id}/detalhe/").status_code, 404)
         nomes = [c["nome"] for c in self.client.get("/api/contas/visao-geral/").data["contas"]]
         self.assertNotIn("Alheia", nomes)
+=======
+class RepetirLancamentoTests(APITestCase):
+    """Um lançamento único (vindo do banco) passa a recorrente ou parcelado depois."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.usuario = get_user_model().objects.create_user(email="r@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(self.usuario)
+        self.conta = Conta.objects.create(dono=self.usuario, nome="Conta")
+
+    def lanc(self, **extra):
+        return Lancamento.objects.create(
+            dono=self.usuario, descricao="Academia", valor=9_990, natureza="despesa", data=date.today(), conta=self.conta, **extra
+        )
+
+    def test_vira_recorrente_e_aparece_no_proximo_mes(self):
+        l = self.lanc()
+        r = self.client.post(f"/api/lancamentos/{l.id}/repetir/", {"tipo": "recorrente"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["lancamento"]["tipo"], "recorrente")
+        proximo = somar_meses(date.today(), 1)
+        self.assertTrue(Lancamento.objects.filter(dono=self.usuario, descricao="Academia", data__year=proximo.year, data__month=proximo.month).exists())
+
+    def test_vira_parcela_e_cria_as_seguintes(self):
+        l = self.lanc()
+        r = self.client.post(f"/api/lancamentos/{l.id}/repetir/", {"tipo": "parcelada", "parcela_atual": 3, "parcela_total": 5}, format="json")
+        self.assertEqual(r.json()["criados"], 2)
+        grupo = Lancamento.objects.filter(dono=self.usuario).order_by("parcela_atual")
+        self.assertEqual([(x.parcela_atual, x.parcela_total) for x in grupo], [(3, 5), (4, 5), (5, 5)])
+
+    def test_so_unico(self):
+        l = self.lanc(tipo="parcelada")
+        self.assertEqual(self.client.post(f"/api/lancamentos/{l.id}/repetir/", {"tipo": "recorrente"}, format="json").status_code, 400)
+        l2 = self.lanc()
+        r = self.client.post(f"/api/lancamentos/{l2.id}/repetir/", {"tipo": "parcelada", "parcela_atual": 4, "parcela_total": 3}, format="json")
+        self.assertEqual(r.status_code, 400)
+>>>>>>> c96d9557cc666c911b1c21932e55ae9682630f35

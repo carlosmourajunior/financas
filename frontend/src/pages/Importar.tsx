@@ -2,7 +2,7 @@ import { useState, type ChangeEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Erro } from '../components/Formularios'
 import ImportarExtrato from './ImportarExtrato'
-import { BuscarFatura, EscolherOrigem } from '../components/OpenFinance'
+import { BuscarFatura, EscolherOrigem, ImportarRecentes } from '../components/OpenFinance'
 import { useOpenFinance, type Origem } from '../lib/openfinance'
 import Icon from '../components/Icon'
 import { Abas, Campo, Secao, Titulo, botaoPrimario, campo } from '../components/ui'
@@ -81,6 +81,7 @@ export default function Importar() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 px-5 pb-8 pt-5 lg:px-8 lg:pt-7">
       <Titulo>Importar</Titulo>
+      <ImportarRecentes />
       <Abas
         rotulo="O que importar"
         opcoes={[

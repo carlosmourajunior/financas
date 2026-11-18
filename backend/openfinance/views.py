@@ -65,7 +65,8 @@ class EstadoView(APIView):
                     {
                         "id": c.id,
                         "tipo": c.tipo,
-                        "nome": c.nome,
+                        "nome": pluggy.nome_com_banco(c, c.nome),
+                        "banco": c.banco,
                         "numero": c.numero,
                         "saldo": c.saldo,
                         "conta": getattr(vinculos.get(c.id), "conta_id", None),
@@ -167,15 +168,22 @@ def trazer_contas(dono) -> dict:
     """Cria no app as contas e cartões da Pluggy que ainda não têm par. Pode rodar quantas vezes quiser."""
     # Trava o usuário: duas chamadas juntas (a tela abre duas vezes) não criam conta em dobro.
     type(dono).objects.select_for_update().filter(pk=dono.pk).first()
-    ligadas = set(Vinculo.objects.filter(dono=dono).values_list("pluggy_conta", flat=True))
+    ligadas = {v.pluggy_conta: v for v in Vinculo.objects.filter(dono=dono).select_related("conta", "cartao")}
     criadas = {"contas": [], "cartoes": []}
     for c in _chamar(pluggy.contas):
         if c.id in ligadas:
+            # Trazida antes com o nome cru do banco ("platinum") e não renomeada: ganha o nome com o banco.
+            alvo = ligadas[c.id].conta or ligadas[c.id].cartao
+            limite = 80 if ligadas[c.id].conta else 40
+            novo = pluggy.nome_com_banco(c, alvo.nome)[:limite]
+            if alvo.nome == c.nome.strip()[:limite] and novo != alvo.nome:
+                alvo.nome = novo
+                alvo.save(update_fields=["nome", "atualizado_em"])
             continue
         if c.tipo == "BANK":
             tipo = Conta.Tipo.POUPANCA if c.subtipo == "SAVINGS_ACCOUNT" else Conta.Tipo.CORRENTE
             # Como no cadastro à mão: o saldo de hoje é o ponto de partida.
-            conta = Conta.objects.create(dono=dono, nome=c.nome[:80] or "Conta", tipo=tipo, saldo_inicial=c.saldo)
+            conta = Conta.objects.create(dono=dono, nome=pluggy.nome_com_banco(c, "Conta")[:80], tipo=tipo, saldo_inicial=c.saldo)
             Vinculo.objects.create(dono=dono, conta=conta, pluggy_conta=c.id)
             criadas["contas"].append(conta.nome)
         elif c.tipo == "CREDIT":
@@ -184,7 +192,7 @@ def trazer_contas(dono) -> dict:
             fecha = _dia(c.fechamento, vence - 7 if vence > 7 else vence + 21)
             final = c.numero[-4:] if c.numero[-4:].isdigit() else ""
             cartao = Cartao.objects.create(
-                dono=dono, nome=c.nome[:40] or "Cartão", final=final, limite=max(c.limite, 0), dia_fechamento=fecha, dia_vencimento=vence
+                dono=dono, nome=pluggy.nome_com_banco(c, "Cartão")[:40], final=final, limite=max(c.limite, 0), dia_fechamento=fecha, dia_vencimento=vence
             )
             Vinculo.objects.create(dono=dono, cartao=cartao, pluggy_conta=c.id)
             criadas["cartoes"].append(str(cartao))

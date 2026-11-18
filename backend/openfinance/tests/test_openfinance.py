@@ -21,12 +21,12 @@ LIGADO = {
 
 CONTAS = {
     "results": [
-        {"id": "cc-1", "type": "BANK", "subtype": "CHECKING_ACCOUNT", "name": "Conta BB", "number": "1234-5", "balance": 1520.35},
+        {"id": "cc-1", "type": "BANK", "subtype": "CHECKING_ACCOUNT", "name": "Nu Pagamentos S.A. - Instituição de Pagamento", "number": "1234-5", "balance": 1520.35},
         {
             "id": "cartao-1",
             "type": "CREDIT",
             "subtype": "CREDIT_CARD",
-            "name": "Nubank",
+            "name": "platinum",
             "number": "5555",
             "balance": 300,
             "creditData": {"creditLimit": 5000, "balanceDueDate": "2026-11-15T00:00:00.000Z", "balanceCloseDate": "2026-11-08T00:00:00.000Z"},
@@ -71,6 +71,9 @@ TRANSACOES_CONTA = [
 def api_falsa(caminho, **params):
     if caminho == "/accounts":
         return CONTAS
+    if caminho.startswith("/items/"):
+        # Com o MeuPluggy o conector é sempre ele, não o banco.
+        return {"id": caminho.split("/")[-1], "connector": {"name": "MeuPluggy"}}
     if caminho == "/bills":
         return FATURAS
     if caminho == "/v2/transactions":
@@ -196,7 +199,7 @@ class TrazerContasTests(APITestCase):
     def test_cria_conta_e_cartao_e_nao_repete(self, _):
         r = self.client.post("/api/openfinance/trazer-contas/")
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(r.json(), {"contas": ["Conta BB"], "cartoes": ["Nubank 5555"]})
+        self.assertEqual(r.json(), {"contas": ["Nubank"], "cartoes": ["Nubank Platinum 5555"]})
         conta = Conta.objects.get(dono=self.usuario)
         self.assertEqual((conta.saldo_inicial, conta.tipo), (152_035, "corrente"))
         cartao = Cartao.objects.get(dono=self.usuario)
@@ -215,7 +218,32 @@ class TrazerContasTests(APITestCase):
         Vinculo.objects.create(dono=self.usuario, conta=conta, pluggy_conta="cc-1")
         self.assertEqual(self.client.post("/api/openfinance/trazer-contas/").json()["contas"], [])
 
+    def test_renomeia_o_que_veio_com_o_nome_cru(self, _):
+        cartao = Cartao.objects.create(dono=self.usuario, nome="platinum", limite=1, dia_fechamento=8, dia_vencimento=15)
+        Vinculo.objects.create(dono=self.usuario, cartao=cartao, pluggy_conta="cartao-1")
+        renomeado = Conta.objects.create(dono=self.usuario, nome="Minha conta")
+        Vinculo.objects.create(dono=self.usuario, conta=renomeado, pluggy_conta="cc-1")
+        self.client.post("/api/openfinance/trazer-contas/")
+        cartao.refresh_from_db()
+        renomeado.refresh_from_db()
+        self.assertEqual((cartao.nome, renomeado.nome), ("Nubank Platinum", "Minha conta"))
+
     def test_outro_usuario_nao_pode(self, _):
         outro = Usuario.objects.create_user(email="outro@exemplo.com", password="senha-forte-123")
         self.client.force_authenticate(outro)
         self.assertEqual(self.client.post("/api/openfinance/trazer-contas/").status_code, 403)
+
+
+class NomeDoBancoTests(APITestCase):
+    def test_banco_pelo_numero_de_transferencia_e_pelo_nome(self):
+        self.assertEqual(pluggy._banco_do_numero("0341/0001/12345-6"), "Itaú")
+        self.assertEqual(pluggy._banco_no_texto("ITAÚ UNIBANCO S.A."), "Itaú")
+        self.assertEqual(pluggy._banco_no_texto("platinum"), "")
+
+    def test_nome_com_banco(self):
+        C = pluggy.ContaPluggy
+        self.assertEqual(pluggy.nome_com_banco(C("1", "BANK", "Banco Inter S.A.", "", 0, subtipo="SAVINGS_ACCOUNT", banco="Inter"), "Conta"), "Inter Poupança")
+        self.assertEqual(pluggy.nome_com_banco(C("2", "CREDIT", "Black", "", 0, banco="Itaú"), "Cartão"), "Itaú Black")
+        self.assertEqual(pluggy.nome_com_banco(C("3", "CREDIT", "Nubank Ultravioleta", "", 0, banco="Nubank"), "Cartão"), "Nubank Ultravioleta")
+        # Sem conta corrente no item, a bandeira identifica o cartão.
+        self.assertEqual(pluggy.nome_com_banco(C("4", "CREDIT", "platinum", "", 0, banco="Mastercard"), "Cartão"), "Mastercard Platinum")

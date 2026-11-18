@@ -283,3 +283,21 @@ class FaturaAbertaMantemParcelasTests(TestCase):
         no_ciclo = Lancamento.objects.filter(cartao=cartao, data__gte=aberta.abre, data__lte=aberta.fecha)
         self.assertEqual(list(no_ciclo.values_list("descricao", "valor")), [("NR *NR ACAMPAM", 26_685)])
         self.assertEqual(Lancamento.objects.filter(cartao=cartao, parcela_atual=12).count(), 1)
+
+    def test_parecida_nao_rouba_a_chave_de_outra_linha_da_fatura(self):
+        from financas.servicos import fatura_aberta, somar_meses
+
+        u = get_user_model().objects.create_user(email="r@exemplo.com", password="senha-forte-123")
+        cartao = Cartao.objects.create(dono=u, nome="Itaú", limite=1_000_000, dia_fechamento=23, dia_vencimento=1)
+        aberta = fatura_aberta(cartao, date.today())
+        fechada = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, 23))
+        anterior = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -2, 23))
+        # Mês passado: a parcela 2/6 da compra B.
+        confirmar(cartao, anterior.fecha, [{"data": anterior.fecha, "descricao": "MERCADOLIVRE*LOJAB", "valor": 10_000, "natureza": "despesa", "parcela_atual": 2, "parcela_total": 6}])
+        # Este mês: a 3/6 de B e a 3/6 de outra compra A, parecida e de valor próximo.
+        itens = [
+            {"data": fechada.fecha, "descricao": "MERCADOLIVRE*LOJAA", "valor": 9_950, "natureza": "despesa", "parcela_atual": 3, "parcela_total": 6},
+            {"data": fechada.fecha, "descricao": "MERCADOLIVRE*LOJAB", "valor": 10_000, "natureza": "despesa", "parcela_atual": 3, "parcela_total": 6},
+        ]
+        confirmar(cartao, fechada.fecha, itens)
+        self.assertEqual(fatura_que_fecha_em(cartao, fechada.fecha).total, 19_950)

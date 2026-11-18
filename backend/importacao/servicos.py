@@ -234,12 +234,17 @@ def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
     # O banco às vezes escreve a mesma compra de outro jeito de uma fatura para outra ("NR *NR ACAMP" e
     # "NR *NR ACAMPAM") ou muda centavos: a chave sairia outra e a parcela, duplicada. Reaproveita a da
     # compra já gravada ao lado (mesma parcela neste ciclo, ou a vizinha no ciclo antes ou depois).
-    usadas: set[str] = set()
+    # Só para a linha cuja chave ainda não existe, e nunca a chave de outra linha desta fatura: duas
+    # linhas com a mesma chave e parcela viram uma só e a fatura perde uma compra.
+    usadas: set[str] = set(chaves.values())
+    gravadas = set(Lancamento.objects.filter(cartao=cartao, chave__in=usadas).values_list("chave", flat=True))
     for i in parceladas:
+        if chaves[id(i)] in gravadas:
+            continue
         existente = _chave_parecida(cartao, ciclo, i, usadas)
         if existente:
             chaves[id(i)] = existente
-        usadas.add(chaves[id(i)])
+            usadas.add(existente)
 
     for i in itens:
         data_item = _dentro(i["data"], ciclo)

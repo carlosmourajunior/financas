@@ -493,3 +493,121 @@ def resumo(dono, hoje: date) -> dict:
             "devem_pessoas": [e.nome for e in devem if saldo_emp(e) > 0],
         },
     }
+
+
+# Contas -------------------------------------------------------------------
+
+
+def _movimento(l: Lancamento) -> dict:
+    return {
+        "id": l.id,
+        "data": l.data,
+        "descricao": l.descricao,
+        "valor": l.valor,
+        "natureza": l.natureza,
+        "pago": l.pago,
+        "tipo": l.tipo,
+        "categoria": l.categoria.nome if l.categoria else None,
+        "conta": l.conta_id,
+        "conta_nome": l.conta.nome if l.conta else None,
+        "parcela_atual": l.parcela_atual,
+        "parcela_total": l.parcela_total,
+    }
+
+
+def _no_mes(qs, inicio: date, fim: date) -> dict:
+    """Entrou e saiu (já pagos) e o que ainda falta pagar ou receber no período."""
+    do_mes = qs.filter(data__gte=inicio, data__lte=fim)
+    return {
+        "inicio": inicio,
+        "fim": fim,
+        "entrou": _soma(do_mes.filter(natureza=Natureza.RECEITA, pago=True)),
+        "saiu": _soma(do_mes.filter(natureza=Natureza.DESPESA, pago=True)),
+        "a_receber": _soma(do_mes.filter(natureza=Natureza.RECEITA, pago=False)),
+        "a_pagar": _soma(do_mes.filter(natureza=Natureza.DESPESA, pago=False)),
+    }
+
+
+def saldos_das_contas(dono) -> dict[int, int]:
+    """Saldo de cada conta: o de partida mais o que já foi recebido, menos o que já foi pago nela."""
+    movimentos = (
+        Lancamento.objects.filter(dono=dono, conta__isnull=False, pago=True)
+        .values("conta")
+        .annotate(
+            receitas=Sum("valor", filter=Q(natureza=Natureza.RECEITA)),
+            despesas=Sum("valor", filter=Q(natureza=Natureza.DESPESA)),
+        )
+    )
+    por_conta = {m["conta"]: (m["receitas"] or 0) - (m["despesas"] or 0) for m in movimentos}
+    return {c.id: c.saldo_inicial + por_conta.get(c.id, 0) for c in Conta.objects.filter(dono=dono)}
+
+
+def _tem_pluggy(objeto) -> bool:
+    # O vínculo fica no app openfinance; sem ele, a relação reversa não existe.
+    return hasattr(objeto, "vinculo_pluggy")
+
+
+def detalhe_conta(conta: Conta, hoje: date, mes: date | None = None) -> dict:
+    """Saldo da conta, os números do mês (o atual ou `mes`) e os lançamentos dele."""
+    mes = inicio_do_mes(mes or hoje)
+    fim = fim_do_mes(mes)
+    gerar_ocorrencias(conta.dono, fim)
+    qs = Lancamento.objects.filter(dono=conta.dono, conta=conta)
+    saldo = saldos_das_contas(conta.dono)[conta.id]
+    return {
+        "conta": {"id": conta.id, "nome": conta.nome, "tipo": conta.tipo, "saldo_inicial": conta.saldo_inicial, "pluggy": _tem_pluggy(conta)},
+        "saldo": saldo,
+        # O saldo quando o mês terminar, se tudo que falta pagar e receber nele acontecer.
+        "previsto": saldo + _soma(qs.filter(data__lte=fim, pago=False, natureza=Natureza.RECEITA)) - _soma(qs.filter(data__lte=fim, pago=False, natureza=Natureza.DESPESA)),
+        "mes": _no_mes(qs, mes, fim),
+        "movimentos": [_movimento(l) for l in qs.filter(data__gte=mes, data__lte=fim).select_related("categoria", "conta").order_by("-data", "-id")],
+    }
+
+
+def visao_geral(dono, hoje: date, mes: date | None = None) -> dict:
+    """Todas as contas e cartões juntos: saldo de cada um, o total e o que as faturas ainda vão levar."""
+    mes = inicio_do_mes(mes or hoje)
+    fim = fim_do_mes(mes)
+    gerar_ocorrencias(dono, fim)
+    saldos = saldos_das_contas(dono)
+    contas = [
+        {"id": c.id, "nome": c.nome, "tipo": c.tipo, "saldo": saldos[c.id], "pluggy": _tem_pluggy(c)}
+        for c in Conta.objects.filter(dono=dono).select_related("vinculo_pluggy")
+    ]
+    # A fatura paga ainda não diz de qual conta saiu, então entra no total e não no saldo de uma conta.
+    faturas_pagas = _soma(PagamentoFatura.objects.filter(dono=dono))
+
+    cartoes = []
+    for c in Cartao.objects.filter(dono=dono).select_related("vinculo_pluggy"):
+        f = fatura_atual(c, hoje)
+        paga = PagamentoFatura.objects.filter(cartao=c, fecha=f.fecha).exists()
+        cartoes.append(
+            {
+                "id": c.id,
+                "nome": c.nome,
+                "final": c.final,
+                "fatura": f.total,
+                "fecha": f.fecha,
+                "vence": f.vence,
+                "aberta": f.fecha >= hoje,
+                "paga": paga,
+                "limite": c.limite,
+                "disponivel": c.limite - limite_usado(c, hoje),
+                "pluggy": _tem_pluggy(c),
+            }
+        )
+
+    em_contas = sum(saldos.values()) - faturas_pagas
+    a_pagar_cartoes = sum(c["fatura"] for c in cartoes if not c["paga"] and c["fatura"] > 0)
+    qs = Lancamento.objects.filter(dono=dono, conta__isnull=False)
+    return {
+        "saldo_contas": sum(saldos.values()),
+        "faturas_pagas": faturas_pagas,
+        "em_contas": em_contas,
+        "faturas_a_pagar": a_pagar_cartoes,
+        "depois_das_faturas": em_contas - a_pagar_cartoes,
+        "contas": contas,
+        "cartoes": cartoes,
+        "mes": _no_mes(qs, mes, fim),
+        "movimentos": [_movimento(l) for l in qs.filter(data__gte=mes, data__lte=fim).select_related("categoria", "conta").order_by("-data", "-id")],
+    }

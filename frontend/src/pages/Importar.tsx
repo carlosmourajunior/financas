@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Erro } from '../components/Formularios'
 import ImportarExtrato from './ImportarExtrato'
 import { BuscarFatura, EscolherOrigem } from '../components/OpenFinance'
@@ -19,7 +19,8 @@ const MOSTRAR = 8
 export default function Importar() {
   const navigate = useNavigate()
   const cad = useCadastros()
-  const [fonte, setFonte] = useState<Fonte>('fatura')
+  const [busca] = useSearchParams()
+  const [fonte, setFonte] = useState<Fonte>(busca.get('fonte') === 'extrato' ? 'extrato' : 'fatura')
   const of = useOpenFinance()
   const [origem, setOrigem] = useState<Origem>('arquivo')
   const [cartao, setCartao] = useState('')

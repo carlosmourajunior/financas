@@ -7,6 +7,7 @@ const paths = {
       <path d="M2 10h20" />
     </>
   ),
+  banco: <path d="M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18M12 3l9 5H3z" />,
   importar: <path d="M12 16V4M7 9l5-5 5 5M4 20h16" />,
   mais: <path d="M12 5v14M5 12h14" />,
   olho: (

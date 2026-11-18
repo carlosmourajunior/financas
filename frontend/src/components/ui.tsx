@@ -43,7 +43,7 @@ export function Abas<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div role="tablist" aria-label={rotulo} className="flex gap-6 border-b border-linha">
+    <div role="tablist" aria-label={rotulo} className="flex gap-6 overflow-x-auto border-b border-linha">
       {opcoes.map((o) => {
         const ativa = o.id === valor
         return (
@@ -52,7 +52,7 @@ export function Abas<T extends string>({
             role="tab"
             aria-selected={ativa}
             onClick={() => onChange(o.id)}
-            className={`-mb-px min-h-11 cursor-pointer border-b-[3px] text-base ${
+            className={`-mb-px min-h-11 shrink-0 cursor-pointer whitespace-nowrap border-b-[3px] text-base ${
               ativa ? 'border-tinta font-bold text-tinta' : 'border-transparent font-semibold text-suave'
             }`}
           >

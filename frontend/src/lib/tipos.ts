@@ -216,3 +216,59 @@ export interface ExtratoImportado {
   transferencias?: number
   repetidos?: number
 }
+
+export interface MovimentoEmConta {
+  id: number
+  data: string
+  descricao: string
+  valor: number
+  natureza: Natureza
+  pago: boolean
+  tipo: Tipo
+  categoria: string | null
+  conta: number | null
+  conta_nome: string | null
+  parcela_atual: number | null
+  parcela_total: number | null
+}
+
+export interface NumerosDoMes {
+  inicio: string
+  fim: string
+  entrou: number
+  saiu: number
+  a_receber: number
+  a_pagar: number
+}
+
+export interface DetalheConta {
+  conta: Conta & { pluggy: boolean }
+  saldo: number
+  previsto: number
+  mes: NumerosDoMes
+  movimentos: MovimentoEmConta[]
+}
+
+export interface VisaoGeralContas {
+  saldo_contas: number
+  faturas_pagas: number
+  em_contas: number
+  faturas_a_pagar: number
+  depois_das_faturas: number
+  contas: { id: number; nome: string; tipo: Conta['tipo']; saldo: number; pluggy: boolean }[]
+  cartoes: {
+    id: number
+    nome: string
+    final: string
+    fatura: number
+    fecha: string
+    vence: string
+    aberta: boolean
+    paga: boolean
+    limite: number
+    disponivel: number
+    pluggy: boolean
+  }[]
+  mes: NumerosDoMes
+  movimentos: MovimentoEmConta[]
+}

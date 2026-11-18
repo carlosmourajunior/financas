@@ -415,3 +415,51 @@ class EmprestimoParcelasPagasTests(ApiBase):
         antes = resumo(self.usuario, date.today())["saldo_em_conta"]
         self.criar()
         self.assertEqual(resumo(self.usuario, date.today())["saldo_em_conta"], antes)
+
+
+class ContasTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        self.poupanca = Conta.objects.create(dono=self.usuario, nome="Poupança", tipo="poupanca", saldo_inicial=50_000)
+        hoje = date.today()
+        self.lancar(descricao="Salário", natureza="receita", valor=300_000, conta=self.conta.id)
+        self.lancar(descricao="Luz", valor=20_000, conta=self.conta.id)
+        self.lancar(descricao="Aluguel", valor=150_000, conta=self.conta.id, data=str(fim_do_mes(hoje) + timedelta(days=1)), pago=False)
+        self.lancar(descricao="Rendimento", natureza="receita", valor=1_000, conta=self.poupanca.id)
+        self.lancar(descricao="Mercado", valor=9_000, cartao=self.cartao.id)
+
+    def test_detalhe_mostra_saldo_e_lancamentos_so_da_conta(self):
+        r = self.client.get(f"/api/contas/{self.conta.id}/detalhe/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["saldo"], 100_000 + 300_000 - 20_000)
+        self.assertEqual(r.data["mes"]["entrou"], 300_000)
+        self.assertEqual(r.data["mes"]["saiu"], 20_000)
+        self.assertEqual({m["descricao"] for m in r.data["movimentos"]}, {"Salário", "Luz"})
+        self.assertFalse(r.data["conta"]["pluggy"])
+
+    def test_detalhe_de_outro_mes(self):
+        proximo = fim_do_mes(date.today()) + timedelta(days=1)
+        r = self.client.get(f"/api/contas/{self.conta.id}/detalhe/?mes={proximo:%Y-%m}")
+        self.assertEqual([m["descricao"] for m in r.data["movimentos"]], ["Aluguel"])
+        self.assertEqual(r.data["mes"]["a_pagar"], 150_000)
+
+    def test_visao_geral_soma_as_contas_e_desconta_faturas(self):
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2020, 1, 3), valor=5_000, data=date(2020, 1, 10))
+        r = self.client.get("/api/contas/visao-geral/")
+        self.assertEqual(r.status_code, 200)
+        saldos = {c["nome"]: c["saldo"] for c in r.data["contas"]}
+        self.assertEqual(saldos, {"Corrente": 380_000, "Poupança": 51_000})
+        self.assertEqual(r.data["faturas_pagas"], 5_000)
+        self.assertEqual(r.data["em_contas"], 431_000 - 5_000)
+        # O total bate com o saldo do Início.
+        self.assertEqual(r.data["em_contas"], self.client.get("/api/resumo/").data["saldo_em_conta"])
+        self.assertEqual(r.data["faturas_a_pagar"], 9_000)
+        self.assertEqual(r.data["depois_das_faturas"], 426_000 - 9_000)
+        self.assertEqual(len(r.data["movimentos"]), 3)  # a compra no cartão fica de fora
+
+    def test_conta_de_outro_usuario_nao_aparece(self):
+        outro = criar_usuario("b@exemplo.com")
+        alheia = Conta.objects.create(dono=outro, nome="Alheia")
+        self.assertEqual(self.client.get(f"/api/contas/{alheia.id}/detalhe/").status_code, 404)
+        nomes = [c["nome"] for c in self.client.get("/api/contas/visao-geral/").data["contas"]]
+        self.assertNotIn("Alheia", nomes)

@@ -17,7 +17,7 @@ from .serializers import (
     PagamentoFaturaSerializer,
     RecorrenciaSerializer,
 )
-from .servicos import detalhe_cartao, faturas_do_mes, fim_do_mes, gerar_ocorrencias, resumo
+from .servicos import detalhe_cartao, detalhe_conta, faturas_do_mes, fim_do_mes, gerar_ocorrencias, resumo, visao_geral
 
 
 def ler_mes(valor: str | None) -> date | None:
@@ -46,6 +46,16 @@ class DoUsuarioViewSet(viewsets.ModelViewSet):
 class ContaViewSet(DoUsuarioViewSet):
     model = Conta
     serializer_class = ContaSerializer
+
+    @action(detail=False, url_path="visao-geral")
+    def visao_geral(self, request):
+        """Todas as contas e cartões juntos, com os lançamentos em conta do mês (?mes=AAAA-MM)."""
+        return Response(visao_geral(request.user, date.today(), ler_mes(request.query_params.get("mes"))))
+
+    @action(detail=True)
+    def detalhe(self, request, pk=None):
+        """Saldo da conta e os lançamentos do mês (?mes=AAAA-MM, padrão o atual)."""
+        return Response(detalhe_conta(self.get_object(), date.today(), ler_mes(request.query_params.get("mes"))))
 
 
 class CartaoViewSet(DoUsuarioViewSet):

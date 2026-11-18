@@ -5,13 +5,15 @@ import Icon, { type IconName } from './Icon'
 const itens: { to: string; label: string; icon: IconName }[] = [
   { to: '/', label: 'Início', icon: 'inicio' },
   { to: '/lancamentos', label: 'Lançamentos', icon: 'lista' },
+  { to: '/contas', label: 'Contas', icon: 'banco' },
   { to: '/cartoes', label: 'Cartões', icon: 'cartao' },
   { to: '/emprestimos', label: 'Empréstimos', icon: 'emprestimo' },
   { to: '/importar', label: 'Importar', icon: 'importar' },
 ]
 
 // No celular a barra inferior tem espaço para quatro itens e o botão de lançar.
-const itensCelular = itens.filter((i) => i.to !== '/emprestimos')
+// Importar fica nas telas de Contas (extrato) e Cartões (fatura).
+const itensCelular = itens.filter((i) => i.to !== '/emprestimos' && i.to !== '/importar')
 
 function iniciais(nome: string) {
   return nome

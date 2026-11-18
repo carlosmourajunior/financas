@@ -129,7 +129,7 @@ class PreviaFaturaView(APIView):
             # Até um ano à frente: as parcelas futuras vêm com a data projetada do mês delas.
             transacoes = _chamar(pluggy.transacoes, conta.id, desde - timedelta(days=JANELA_PARCELAS), ciclo.fecha + timedelta(days=366))
             ids = {b["id"] for b in fechadas}
-            lida = conversao.fatura_aberta(conta.nome, final, ids, desde, ciclo.fecha, ciclo.vence, transacoes)
+            lida = conversao.fatura_aberta(conta.nome, final, ids, desde, ciclo.fecha, ciclo.vence, transacoes, fechadas)
         else:
             fatura = next((b for b in fechadas if b["id"] == escolhida), None)
             if not fatura:
@@ -188,17 +188,16 @@ def _dia(d: date | None) -> int | None:
 
 
 def _datas_do_cartao(c: pluggy.ContaPluggy) -> tuple[int | None, int | None]:
-    """Fechamento e vencimento: do cartão ou, se o banco não informa ali, da última fatura."""
-    fecha, vence = _dia(c.fechamento), _dia(c.vencimento)
-    if fecha and vence:
-        return fecha, vence
+    """Fechamento e vencimento: da última fatura fechada e, sem ela, do cartão.
+
+    A data do cartão (balanceCloseDate) pode vir errada: no Itaú veio 25 com fechamento real no 23.
+    """
     try:
         ultima = next(iter(pluggy.faturas(c.id)), None)
     except pluggy.ErroPluggy:
         ultima = None
-    if ultima:
-        fecha = fecha or _dia(_data_iso(ultima.get("billClosingDate")))
-        vence = vence or _dia(_data_iso(ultima.get("dueDate")))
+    fecha = _dia(_data_iso((ultima or {}).get("billClosingDate"))) or _dia(c.fechamento)
+    vence = _dia(_data_iso((ultima or {}).get("dueDate"))) or _dia(c.vencimento)
     return fecha, vence
 
 
@@ -357,7 +356,7 @@ def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
         # O que ainda não está em fatura fechada vai todo para a aberta (com a próxima parcela de cada
         # compra); as parcelas seguintes viram previsão nas próximas faturas.
         ids = {b["id"] for b in fechadas}
-        lidas.append(conversao.fatura_aberta(cartao.nome, final, ids, inicio_aberta, aberta.fecha, aberta.vence, transacoes))
+        lidas.append(conversao.fatura_aberta(cartao.nome, final, ids, inicio_aberta, aberta.fecha, aberta.vence, transacoes, fechadas))
         for lida in lidas:
             if not lida.itens:
                 continue

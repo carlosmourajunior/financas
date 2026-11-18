@@ -110,7 +110,19 @@ def _compra(t: dict) -> tuple:
     return (normalizar(descricao), meta.get("totalInstallments"), (meta.get("purchaseDate") or "")[:10] or centavos(t.get("amount")))
 
 
-def fatura_aberta(nome: str, final: str, ids_fechadas: set[str], desde: date, fecha: date, vence: date, transacoes: list[dict]) -> FaturaLida:
+def _encargo_da_ultima(nome: str, final: str, fechadas: list[dict], transacoes: list[dict]) -> int:
+    """Juros, IOF e saldo anterior que entraram na última fatura fechada sem virar transação."""
+    com_data = [b for b in fechadas if b.get("dueDate")]
+    if not com_data:
+        return 0
+    ultima = max(com_data, key=lambda b: b["dueDate"])
+    lida = fatura_fechada(nome, final, fechadas, ultima, transacoes)
+    return sum(i.valor for i in lida.itens if i.tipo == Tipo.ENCARGO and i.descricao.startswith("Juros, IOF"))
+
+
+def fatura_aberta(
+    nome: str, final: str, ids_fechadas: set[str], desde: date, fecha: date, vence: date, transacoes: list[dict], fechadas: list[dict] | None = None
+) -> FaturaLida:
     """O que vai entrar na fatura que ainda não fechou: compras novas e a próxima parcela de cada compra antiga.
 
     A Pluggy lista as parcelas futuras ainda sem fatura, cada uma num dia projetado do mês dela, que não
@@ -128,10 +140,17 @@ def fatura_aberta(nome: str, final: str, ids_fechadas: set[str], desde: date, fe
             chave = _compra(t)
             if chave not in proxima_parcela or atual < proxima_parcela[chave]["creditCardMetadata"]["installmentNumber"]:
                 proxima_parcela[chave] = t
-        elif desde <= _data(t) <= fecha:
+        elif com_fatura or desde <= _data(t) <= fecha:
+            # Com o id da fatura no conector, o que não está numa fatura fechada é da aberta, seja qual
+            # for a data (compra lançada antes do início do ciclo no app, estorno pequeno).
             escolhidas.append(t)
     escolhidas += proxima_parcela.values()
     itens = [i for i in map(item_da_fatura, escolhidas) if i]
+    encargo = _encargo_da_ultima(nome, final, fechadas or [], transacoes)
+    if encargo > 0:
+        # O banco só soma juros, IOF e saldo anterior ao fechar. Até lá, repete o da fatura passada como
+        # previsão; ao importar a fatura fechada, a linha dá lugar à diferença de verdade.
+        itens.append(Item(data=fecha, descricao="Previsto: juros, IOF e saldo anterior como na fatura passada", valor=encargo, tipo=Tipo.ENCARGO))
     return FaturaLida(banco=nome, itens=sorted(itens, key=lambda i: i.data), total=None, vencimento=vence, final=final)
 
 

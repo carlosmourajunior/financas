@@ -181,6 +181,25 @@ def grupo_da_chave(cartao: Cartao, chave: str) -> uuid.UUID:
     return uuid.uuid5(uuid.NAMESPACE_URL, f"financas:{cartao.pk}:{chave}")
 
 
+def _parecidas(a: str, b: str) -> bool:
+    a, b = normalizar(a).replace(" ", ""), normalizar(b).replace(" ", "")
+    curta = min(len(a), len(b))
+    return curta >= 4 and a[: min(curta, 10)] == b[: min(curta, 10)]
+
+
+def _chave_parecida(cartao: Cartao, ciclo: Fatura, item: dict, usadas: set[str]) -> str | None:
+    atual, total, valor = item["parcela_atual"], item["parcela_total"], item["valor"]
+    folga = max(100, valor // 50)  # até R$ 1 ou 2% de diferença
+    vizinhas = Lancamento.objects.filter(cartao=cartao, parcela_total=total, valor__gte=valor - folga, valor__lte=valor + folga).exclude(chave="")
+    mesma = vizinhas.filter(parcela_atual=atual, data__gte=ciclo.abre, data__lte=ciclo.fecha)
+    seguinte = vizinhas.filter(parcela_atual=atual + 1, data__gt=ciclo.fecha, data__lte=ciclo.fecha + timedelta(days=35))
+    anterior = vizinhas.filter(parcela_atual=atual - 1, data__lt=ciclo.abre, data__gte=ciclo.abre - timedelta(days=35))
+    for l in list(mesma) + list(seguinte) + list(anterior):
+        if l.chave not in usadas and _parecidas(l.descricao, item["descricao"]):
+            return l.chave
+    return None
+
+
 @transaction.atomic
 def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
     """Grava as linhas escolhidas no ciclo que fecha em `fecha`.
@@ -212,6 +231,15 @@ def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
         base = chave_da_compra(ciclo.fecha, i["descricao"], i["parcela_atual"], i["parcela_total"], 0)
         ordens[base] += 1
         chaves[id(i)] = chave_da_compra(ciclo.fecha, i["descricao"], i["parcela_atual"], i["parcela_total"], ordens[base])
+    # O banco às vezes escreve a mesma compra de outro jeito de uma fatura para outra ("NR *NR ACAMP" e
+    # "NR *NR ACAMPAM") ou muda centavos: a chave sairia outra e a parcela, duplicada. Reaproveita a da
+    # compra já gravada ao lado (mesma parcela neste ciclo, ou a vizinha no ciclo antes ou depois).
+    usadas: set[str] = set()
+    for i in parceladas:
+        existente = _chave_parecida(cartao, ciclo, i, usadas)
+        if existente:
+            chaves[id(i)] = existente
+        usadas.add(chaves[id(i)])
 
     for i in itens:
         data_item = _dentro(i["data"], ciclo)

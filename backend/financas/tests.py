@@ -614,3 +614,15 @@ class CategoriaTests(ApiBase):
         lanc = self.lancar(descricao="Ração", conta=self.conta.id, categoria=c["id"]).data
         self.assertEqual(self.client.delete(f"/api/categorias/{c['id']}/").status_code, 204)
         self.assertIsNone(Lancamento.objects.get(pk=lanc["id"]).categoria_id)
+
+
+class DeOndeVeioTests(ApiBase):
+    def test_receitas_por_categoria_no_resumo(self):
+        from .models import Categoria
+
+        salario = Categoria.objects.create(dono=self.usuario, nome="Salário X", natureza="receita")
+        self.lancar(descricao="Salário", natureza="receita", valor=300_000, conta=self.conta.id, categoria=salario.id)
+        self.lancar(descricao="Pix", natureza="receita", valor=5_000, conta=self.conta.id)
+        self.lancar(descricao="Estorno", natureza="receita", valor=1_000, cartao=self.cartao.id)
+        r = self.client.get("/api/resumo/").data["receitas_categorias"]
+        self.assertEqual([(c["nome"], c["valor"]) for c in r], [("Salário X", 300_000), ("Sem categoria", 5_000)])

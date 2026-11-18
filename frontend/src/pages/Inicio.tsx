@@ -67,6 +67,7 @@ export default function Inicio() {
   const partes = moedaPartes(r.livre_para_gastar)
   const ultimoDia = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
   const maiorCategoria = Math.max(0, ...r.categorias.map((c) => c.valor))
+  const maiorReceita = Math.max(1, ...r.receitas_categorias.map((c) => c.valor))
   const proximoMes = MESES[(hoje.getMonth() + 1) % 12]
   const emp = r.emprestimos
 
@@ -232,6 +233,22 @@ export default function Inicio() {
                 <span className="font-bold tabular-nums text-credito">- {m(r.creditos_cartao)}</span>
               </div>
             )}
+          </Secao>
+
+          <Secao titulo="De onde veio o dinheiro" acao={<LinkAcao to="/lancamentos">Detalhes</LinkAcao>}>
+            <p className="pb-1.5 text-[15px] text-suave">O que entrou nas contas em {MESES[hoje.getMonth()]}, por categoria.</p>
+            {r.receitas_categorias.length === 0 && <p className="py-2.5 text-[15px] text-suave">Nenhuma receita lançada este mês.</p>}
+            {r.receitas_categorias.map((c) => (
+              <div key={c.id ?? c.nome} className="flex flex-col gap-1.5 border-b border-linha py-2.5">
+                <div className="flex justify-between text-[15px]">
+                  <span className="font-semibold">
+                    <RotuloCategoria nome={c.nome} cor={c.cor} />
+                  </span>
+                  <span className="font-bold tabular-nums text-credito">{m(c.valor)}</span>
+                </div>
+                <Barra largura={pct(c.valor, maiorReceita)} altura="h-2" corHex={c.cor} />
+              </div>
+            ))}
           </Secao>
         </div>
 

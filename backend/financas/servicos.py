@@ -479,6 +479,14 @@ def resumo(dono, hoje: date) -> dict:
         .order_by("-valor")
     )
 
+    # De onde veio o dinheiro: o que entrou nas contas no mês, por categoria (estorno no cartão não conta).
+    receitas_categorias = (
+        do_mes.filter(natureza=Natureza.RECEITA, cartao__isnull=True)
+        .values("categoria", "categoria__nome", "categoria__cor")
+        .annotate(valor=Sum("valor"))
+        .order_by("-valor")
+    )
+
     prox_inicio = fim + timedelta(days=1)
     prox_fim = fim_do_mes(prox_inicio)
     # O que sai da conta no mês que vem: contas fora do cartão e as faturas que vencem nele.
@@ -541,6 +549,10 @@ def resumo(dono, hoje: date) -> dict:
         "parcelas_anteriores": _soma(gastos.filter(parcela_atual__gt=1)),
         # Estornos e créditos nas faturas do mês: abatem o gasto, fora das categorias.
         "creditos_cartao": creditos,
+        "receitas_categorias": [
+            {"id": c["categoria"], "nome": c["categoria__nome"] or "Sem categoria", "cor": c["categoria__cor"] or COR_SEM_CATEGORIA, "valor": c["valor"]}
+            for c in receitas_categorias
+        ],
         "categorias": [
             {"id": c["categoria"], "nome": c["categoria__nome"] or "Sem categoria", "cor": c["categoria__cor"] or COR_SEM_CATEGORIA, "valor": c["valor"]}
             for c in categorias

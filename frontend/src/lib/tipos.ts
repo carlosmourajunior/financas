@@ -66,6 +66,7 @@ export interface Resumo {
   entrou: number
   saiu: number
   categorias: { id: number | null; nome: string; cor: string; valor: number }[]
+  receitas_categorias: { id: number | null; nome: string; cor: string; valor: number }[]
   parcelas_anteriores: number
   creditos_cartao: number
   sai_da_conta: number

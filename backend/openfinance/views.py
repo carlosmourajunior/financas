@@ -13,15 +13,15 @@ from rest_framework.exceptions import APIException, PermissionDenied, Validation
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, Natureza, PagamentoFatura
-from financas.servicos import fatura_aberta, fecha_do_mes
+from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, Natureza, PagamentoEmprestimo, PagamentoFatura
+from financas.servicos import fatura_aberta, fecha_do_mes, vencimentos_das_parcelas
 from importacao.extrato import Classe, confirmar_extrato, previa_extrato
 from importacao.leitores.base import normalizar
 from importacao.servicos import confirmar, previa
 from importacao.views import cartao_do_usuario, conta_do_usuario
 
 from . import conversao, pluggy
-from .models import Vinculo
+from .models import EmprestimoVinculado, Vinculo
 
 ABERTA = "aberta"
 # Parcelas de compras antigas chegam com a data da compra, que pode ser de mais de um ano antes.
@@ -339,6 +339,73 @@ class TrazerContasView(APIView):
     def post(self, request):
         _exigir_liberado(request)
         return Response(trazer_contas(request.user))
+
+
+def _campos_do_emprestimo(e: pluggy.EmprestimoPluggy) -> dict:
+    # Com parcela e quantidade, o total é o que ainda vai ser pago parcela a parcela; sem elas, o saldo devedor.
+    if e.parcela_valor and e.parcelas_total:
+        total = e.parcela_valor * e.parcelas_total
+    else:
+        total = e.saldo_devedor or e.valor_contratado
+    vence = e.primeiro_vencimento or e.ultimo_vencimento
+    nome = e.nome if not e.contrato else f"{e.nome} {e.contrato[-6:]}"
+    return {
+        "nome": nome[:120],
+        "instituicao": e.banco[:80],
+        "valor_total": max(total, 1),
+        "juros_mensal": e.juros_mensal,
+        "parcela_valor": e.parcela_valor if e.parcelas_total else None,
+        "parcelas_total": e.parcelas_total if e.parcela_valor else None,
+        "prazo": e.ultimo_vencimento,
+        "dia_vencimento": min(vence.day, 28) if vence else None,
+    }
+
+
+def _acertar_pagas(emp: Emprestimo, pagas: int | None) -> None:
+    """Registra as parcelas pagas que o banco informa e o app ainda não tem."""
+    if not pagas or not emp.parcela_valor:
+        return
+    feitas = emp.pagamentos.count()
+    datas = vencimentos_das_parcelas(emp)[feitas:pagas]
+    PagamentoEmprestimo.objects.bulk_create(PagamentoEmprestimo(dono=emp.dono, emprestimo=emp, valor=emp.parcela_valor, data=d) for d in datas)
+
+
+@transaction.atomic
+def trazer_emprestimos(dono) -> dict:
+    """Cria em Empréstimos (eu devo) os contratos da Pluggy e atualiza os já trazidos. Pode rodar quantas vezes quiser."""
+    type(dono).objects.select_for_update().filter(pk=dono.pk).first()
+    ligados = {v.pluggy_emprestimo: v for v in EmprestimoVinculado.objects.filter(dono=dono).select_related("emprestimo")}
+    feito = {"novos": [], "atualizados": [], "quitados": 0}
+    for e in _chamar(pluggy.emprestimos):
+        campos = _campos_do_emprestimo(e)
+        v = ligados.get(e.id)
+        if v:
+            emp = v.emprestimo
+            for k, valor in campos.items():
+                setattr(emp, k, valor)
+            emp.save()
+            _acertar_pagas(emp, e.parcelas_pagas)
+            feito["atualizados"].append(emp.nome)
+            continue
+        if e.saldo_devedor == 0:
+            feito["quitados"] += 1  # contrato já quitado: não entra como dívida
+            continue
+        primeiro = e.primeiro_vencimento
+        # A contratação fica antes do 1º vencimento, para as parcelas caírem nas datas do banco.
+        data = e.data or (date(primeiro.year, primeiro.month, 1) - timedelta(days=1) if primeiro else date.today())
+        emp = Emprestimo.objects.create(dono=dono, direcao=Emprestimo.Direcao.DEVO, data=data, **campos)
+        EmprestimoVinculado.objects.create(dono=dono, emprestimo=emp, pluggy_emprestimo=e.id)
+        _acertar_pagas(emp, e.parcelas_pagas)
+        feito["novos"].append(emp.nome)
+    return feito
+
+
+class TrazerEmprestimosView(APIView):
+    """Traz os empréstimos e financiamentos dos bancos conectados para Empréstimos."""
+
+    def post(self, request):
+        _exigir_liberado(request)
+        return Response(trazer_emprestimos(request.user))
 
 
 _PAGA_FATURA = re.compile(r"\b(pagamento de fatura|pagamento fatura|pgto fatura|pag fat|fatura do cartao|fatura cartao|cartao de credito)\b")

@@ -371,3 +371,53 @@ export function ImportarRecentes() {
     </section>
   )
 }
+
+interface EmprestimosTrazidos {
+  novos: string[]
+  atualizados: string[]
+  quitados: number
+}
+
+/** Traz os empréstimos e financiamentos dos bancos conectados. Só aparece com o Open Finance ligado. */
+export function TrazerEmprestimos({ aoTrazer }: { aoTrazer: () => void }) {
+  const of = useOpenFinance()
+  const [trazendo, setTrazendo] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
+
+  async function trazer() {
+    setErro(null)
+    setAviso(null)
+    setTrazendo(true)
+    try {
+      const r = await api<EmprestimosTrazidos>('/openfinance/trazer-emprestimos/', { method: 'POST' })
+      const partes: string[] = []
+      if (r.novos.length) partes.push(`Trouxemos do banco: ${r.novos.join(', ')}.`)
+      if (r.atualizados.length) partes.push(`Atualizados: ${r.atualizados.join(', ')}.`)
+      if (!r.novos.length && !r.atualizados.length)
+        partes.push(
+          r.quitados
+            ? 'Os empréstimos que o banco informou já estão quitados.'
+            : 'O banco não informou nenhum empréstimo. Na conexão do MeuPluggy, autorize também os dados de empréstimos e financiamentos.',
+        )
+      setAviso(partes.join(' '))
+      aoTrazer()
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível trazer os empréstimos do banco.')
+    } finally {
+      setTrazendo(false)
+    }
+  }
+
+  if (!of.ativo) return null
+  return (
+    <div className="flex flex-col gap-2">
+      <button onClick={trazer} disabled={trazendo} className={`${botaoSecundario} w-full disabled:opacity-60`}>
+        <Icon name="buscar" size={20} />
+        {trazendo ? 'Buscando no banco…' : 'Trazer empréstimos do banco'}
+      </button>
+      {aviso && <p className="text-[15px] text-suave">{aviso}</p>}
+      {erro && <Erro>{erro}</Erro>}
+    </div>
+  )
+}

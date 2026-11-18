@@ -511,3 +511,63 @@ class FechamentoDeCadaFaturaTests(APITestCase):
         self.assertEqual((aberta.abre, aberta.fecha), (date(2026, 10, 26), date(2026, 11, 23)))
         # O pagamento registrado foi junto para o novo dia.
         self.assertTrue(PagamentoFatura.objects.filter(cartao=cartao, fecha=date(2026, 10, 25)).exists())
+
+
+EMPRESTIMOS = {
+    "results": [
+        {
+            "id": "emp-1",
+            "contractNumber": "000123456789",
+            "productName": "CREDITO PESSOAL",
+            "contractDate": "2026-01-10",
+            "contractAmount": 12000.00,
+            "firstInstallmentDueDate": "2026-02-05",
+            "dueDate": "2027-01-05",
+            "interestRates": [{"preFixedRate": 0.0189, "taxPeriodicity": "AM"}],
+            "installments": {"totalNumberOfInstallments": 12, "paidInstallments": 3, "dueInstallments": 9},
+            "payments": {
+                "contractOutstandingBalance": 8500.00,
+                "releases": [{"paidDate": "2026-04-05", "paidAmount": 1100.00, "isOverParcelPayment": False}],
+            },
+        },
+        {"id": "emp-2", "productName": "CDC", "contractAmount": 500, "payments": {"contractOutstandingBalance": 0}},
+    ],
+    "totalPages": 1,
+}
+
+
+def api_com_emprestimos(caminho, **params):
+    if caminho == "/loans":
+        return EMPRESTIMOS
+    return api_falsa(caminho, **params)
+
+
+@override_settings(**LIGADO)
+@patch("openfinance.pluggy._get", side_effect=api_com_emprestimos)
+class TrazerEmprestimosTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.usuario = Usuario.objects.create_user(email="eu@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(self.usuario)
+
+    def test_traz_empréstimo_com_parcelas_pagas_e_nao_repete(self, _):
+        from financas.models import Emprestimo
+
+        r = self.client.post("/api/openfinance/trazer-emprestimos/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json(), {"novos": ["Credito Pessoal 456789"], "atualizados": [], "quitados": 1})
+        e = Emprestimo.objects.get(dono=self.usuario)
+        self.assertEqual((e.direcao, e.instituicao, e.parcela_valor, e.parcelas_total, e.dia_vencimento), ("devo", "Nubank", 110_000, 12, 5))
+        self.assertEqual(e.valor_total, 110_000 * 12)
+        self.assertEqual(str(e.juros_mensal), "1.890")
+        self.assertEqual([p.data for p in e.pagamentos.order_by("data")], [date(2026, 2, 5), date(2026, 3, 5), date(2026, 4, 5)])
+        # De novo: atualiza o mesmo, sem duplicar nem repetir pagamentos.
+        r = self.client.post("/api/openfinance/trazer-emprestimos/")
+        self.assertEqual(r.json()["atualizados"], ["Credito Pessoal 456789"])
+        self.assertEqual(Emprestimo.objects.filter(dono=self.usuario).count(), 1)
+        self.assertEqual(e.pagamentos.count(), 3)
+
+    def test_so_o_dono_das_contas(self, _):
+        outro = Usuario.objects.create_user(email="outro@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(outro)
+        self.assertEqual(self.client.post("/api/openfinance/trazer-emprestimos/").status_code, 403)

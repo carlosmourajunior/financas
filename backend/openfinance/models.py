@@ -24,3 +24,16 @@ class Vinculo(DoUsuario):
 
     def __str__(self):
         return f"{self.conta or self.cartao} -> {self.pluggy_conta}"
+
+
+class EmprestimoVinculado(DoUsuario):
+    """Empréstimo trazido da Pluggy: importar de novo atualiza o mesmo, sem duplicar."""
+
+    emprestimo = models.OneToOneField("financas.Emprestimo", on_delete=models.CASCADE, related_name="vinculo_pluggy")
+    pluggy_emprestimo = models.CharField(max_length=64)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["dono", "pluggy_emprestimo"], name="emprestimo_pluggy_unico")]
+
+    def __str__(self):
+        return f"{self.emprestimo} -> {self.pluggy_emprestimo}"

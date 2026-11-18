@@ -279,3 +279,93 @@ def faturas(conta_id: str) -> list[dict]:
             break
         pagina += 1
     return sorted(resultado, key=lambda b: b.get("dueDate") or "", reverse=True)
+
+
+@dataclass
+class EmprestimoPluggy:
+    id: str
+    nome: str
+    banco: str
+    contrato: str
+    data: date | None
+    valor_contratado: int
+    saldo_devedor: int | None
+    parcelas_total: int | None
+    parcelas_pagas: int | None
+    parcela_valor: int | None
+    primeiro_vencimento: date | None
+    ultimo_vencimento: date | None
+    juros_mensal: Decimal | None
+
+
+def _inteiro(valor) -> int | None:
+    try:
+        return int(valor) if valor not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _juros_mensal(taxas: list[dict]) -> Decimal | None:
+    """Taxa pré-fixada ao mês, em %. A Open Finance manda fração (0.0189) e às vezes ao ano."""
+    for t in taxas or []:
+        taxa = t.get("preFixedRate")
+        if taxa in (None, ""):
+            continue
+        taxa = Decimal(str(taxa))
+        if taxa < 1:
+            taxa *= 100
+        if (t.get("taxPeriodicity") or "").upper() in ("AA", "ANUAL", "YEARLY"):
+            taxa = ((1 + taxa / 100) ** (Decimal(1) / 12) - 1) * 100
+        return taxa.quantize(Decimal("0.001"))
+    return None
+
+
+def ler_emprestimo(bruto: dict, banco: str) -> EmprestimoPluggy:
+    """Um contrato de /loans (Open Finance: dados de operações de crédito) no formato do app."""
+    parcelas = bruto.get("installments") or {}
+    pagamentos = bruto.get("payments") or {}
+    total = _inteiro(parcelas.get("totalNumberOfInstallments"))
+    pagas = _inteiro(parcelas.get("paidInstallments"))
+    restantes = _inteiro(parcelas.get("dueInstallments")) or _inteiro(parcelas.get("contractRemainingNumber"))
+    if total is None and pagas is not None and restantes is not None:
+        total = pagas + restantes
+    if pagas is None and total is not None and restantes is not None:
+        pagas = max(0, total - restantes)
+    saldo = pagamentos.get("contractOutstandingBalance", bruto.get("outstandingBalance"))
+    saldo = centavos(saldo) if saldo not in (None, "") else None
+    # O valor da parcela não vem pronto: o último pagamento de parcela, ou o saldo pelas que faltam.
+    lancamentos = [r for r in pagamentos.get("releases") or [] if not r.get("isOverParcelPayment") and r.get("paidAmount")]
+    lancamentos.sort(key=lambda r: r.get("paidDate") or "")
+    parcela = centavos(lancamentos[-1]["paidAmount"]) if lancamentos else None
+    if not parcela and saldo and restantes:
+        parcela = saldo // restantes
+    return EmprestimoPluggy(
+        id=bruto["id"],
+        nome=titulo((bruto.get("productName") or bruto.get("type") or "Empréstimo").strip())[:120],
+        banco=banco,
+        contrato=str(bruto.get("contractNumber") or ""),
+        data=_data(bruto.get("contractDate") or bruto.get("date")),
+        valor_contratado=centavos(bruto.get("contractAmount")),
+        saldo_devedor=saldo,
+        parcelas_total=total,
+        parcelas_pagas=pagas,
+        parcela_valor=parcela,
+        primeiro_vencimento=_data(bruto.get("firstInstallmentDueDate")),
+        ultimo_vencimento=_data(bruto.get("dueDate")),
+        juros_mensal=_juros_mensal(bruto.get("interestRates")),
+    )
+
+
+def emprestimos() -> list[EmprestimoPluggy]:
+    """Empréstimos e financiamentos de todos os itens. Item conectado sem o consentimento de empréstimos não traz nada."""
+    bancos = {c.item: c.banco for c in contas() if c.banco}
+    resultado = []
+    for item in settings.PLUGGY_ITEM_IDS:
+        pagina = 1
+        while True:
+            r = _get("/loans", itemId=item, page=pagina, pageSize=100)
+            resultado.extend(ler_emprestimo(b, bancos.get(item, "")) for b in r.get("results", []) if b.get("id"))
+            if pagina >= (r.get("totalPages") or 1):
+                break
+            pagina += 1
+    return resultado

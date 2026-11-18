@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import BotaoPagar from '../components/BotaoPagar'
 import { Erro } from '../components/Formularios'
+import { TrazerEmprestimos } from '../components/OpenFinance'
 import { Abas, Barra, Campo, Titulo, botaoPrimario, botaoSecundario, campo } from '../components/ui'
 import { api, type Pagina } from '../lib/api'
 import { diaMes, isoData, lerData, maiuscula } from '../lib/datas'
@@ -63,6 +64,7 @@ export default function Emprestimos() {
         valor={aba}
         onChange={trocarAba}
       />
+      {devo && <TrazerEmprestimos aoTrazer={resposta.recarregar} />}
 
       <div className="flex flex-col gap-1.5 pt-1">
         <p className="text-[15px] text-suave">{devo ? 'Você ainda deve' : 'Ainda vão te devolver'}</p>

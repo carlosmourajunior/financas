@@ -12,6 +12,9 @@ class UsuarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Usuario
         fields = ["id", "nome", "email"]
+        # O e-mail é o login e decide quem vê o Open Finance (PLUGGY_USUARIOS). Trocar por aqui
+        # deixaria alguém virar "DONO@..." (o único do banco não diferencia maiúsculas).
+        read_only_fields = ["email"]
 
 
 class CadastroSerializer(serializers.Serializer):

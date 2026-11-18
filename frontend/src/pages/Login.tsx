@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Abas, Campo, botaoPrimario, campo } from '../components/ui'
+import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 
 type Modo = 'entrar' | 'criar'
@@ -16,7 +17,15 @@ export default function Login() {
   const [senha, setSenha] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
-  const entrar = modo === 'entrar'
+  // A aba "Criar conta" só aparece quando o servidor aceita cadastro pelo site.
+  const [cadastroAberto, setCadastroAberto] = useState(false)
+  const entrar = modo === 'entrar' || !cadastroAberto
+
+  useEffect(() => {
+    api<{ aberto: boolean }>('/auth/cadastro/', { auth: false })
+      .then((r) => setCadastroAberto(r.aberto))
+      .catch(() => setCadastroAberto(false))
+  }, [])
   const destino = (local.state as { de?: string } | null)?.de ?? '/'
 
   if (auth.usuario) return <Navigate to={destino} replace />
@@ -55,15 +64,17 @@ export default function Login() {
         </div>
       </div>
 
-      <Abas
-        rotulo="Acesso"
-        opcoes={[
-          { id: 'entrar', label: 'Entrar' },
-          { id: 'criar', label: 'Criar conta' },
-        ]}
-        valor={modo}
-        onChange={setModo}
-      />
+      {cadastroAberto && (
+        <Abas
+          rotulo="Acesso"
+          opcoes={[
+            { id: 'entrar', label: 'Entrar' },
+            { id: 'criar', label: 'Criar conta' },
+          ]}
+          valor={modo}
+          onChange={setModo}
+        />
+      )}
 
       <form onSubmit={enviar} className="flex grow flex-col gap-4">
         {!entrar && (

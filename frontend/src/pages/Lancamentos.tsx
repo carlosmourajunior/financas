@@ -4,12 +4,12 @@ import BotaoPagar from '../components/BotaoPagar'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Titulo } from '../components/ui'
-import type { Pagina } from '../lib/api'
+import { api, type Pagina } from '../lib/api'
 import { useCadastros } from '../lib/cadastros'
 import { MESES, isoData, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda } from '../lib/format'
 import { desfazerPagamentoFatura, excluirLancamento, marcarLancamento, pagarFatura } from '../lib/pagar'
-import type { FaturaDoMes, Lancamento } from '../lib/tipos'
+import type { Categoria, FaturaDoMes, Lancamento } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
 type Filtro = 'todos' | 'despesa' | 'receita' | 'fatura' | 'recorrente' | 'parcelada'
@@ -36,6 +36,7 @@ interface Linha {
   parcela?: string
   para?: string
   lancamento?: number
+  categoria?: number | null
   fatura?: FaturaDoMes
 }
 
@@ -50,7 +51,7 @@ function situacao(l: Linha, hoje: string) {
 }
 
 /** O botão de pagar ou desfazer da linha, ou nada. */
-function acaoDa(l: Linha, hoje: string, aoMudar: () => void) {
+function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categoria[]) {
   const f = l.fatura
   if (f) {
     if (f.pagamento) return <BotaoPagar discreto rotulo="Desfazer pagamento" acao={() => desfazerPagamentoFatura(f.pagamento!.id)} aoMudar={aoMudar} />
@@ -69,7 +70,111 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void) {
       aoMudar={aoMudar}
     />
   )
-  return <Excluir l={l} id={id} aoMudar={aoMudar} antes={pagar} />
+  return (
+    <Excluir
+      l={l}
+      id={id}
+      aoMudar={aoMudar}
+      antes={
+        <>
+          {pagar}
+          <Ajustar l={l} id={id} categorias={categorias.filter((c) => c.natureza === l.natureza)} aoMudar={aoMudar} />
+        </>
+      }
+    />
+  )
+}
+
+/** Categoria e, para um lançamento único (vindo do banco, por exemplo), marcar como recorrente ou parcela. */
+function Ajustar({ l, id, categorias, aoMudar }: { l: Linha; id: number; categorias: Categoria[]; aoMudar: () => void }) {
+  const [aberto, setAberto] = useState(false)
+  const [atual, setAtual] = useState('1')
+  const [total, setTotal] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState(false)
+
+  async function fazer(acao: () => Promise<unknown>) {
+    setErro(null)
+    setSalvando(true)
+    try {
+      await acao()
+      setAberto(false)
+      aoMudar()
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível salvar.')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  if (!aberto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAberto(true)}
+        className="min-h-7 cursor-pointer text-[13px] font-semibold text-suave underline underline-offset-2"
+      >
+        Ajustar
+      </button>
+    )
+  }
+  const unico = l.tipo === 'unica'
+  return (
+    <span className="flex w-full flex-col gap-2.5 rounded-[10px] bg-nevoa px-3 py-3">
+      <label className="flex flex-col gap-1 text-sm font-semibold">
+        Categoria
+        <select
+          value={l.categoria ?? ''}
+          disabled={salvando}
+          onChange={(e) =>
+            fazer(() => api(`/lancamentos/${id}/`, { method: 'PATCH', body: { categoria: e.target.value ? Number(e.target.value) : null } }))
+          }
+          className="min-h-10 rounded-lg border border-linha bg-white px-2 text-[15px] font-normal"
+        >
+          <option value="">Sem categoria</option>
+          {categorias.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nome}
+            </option>
+          ))}
+        </select>
+      </label>
+      {unico && (
+        <>
+          <button
+            type="button"
+            disabled={salvando}
+            onClick={() => fazer(() => api(`/lancamentos/${id}/repetir/`, { method: 'POST', body: { tipo: 'recorrente' } }))}
+            className="min-h-10 cursor-pointer rounded-lg border border-borda bg-white px-3 text-left text-sm font-bold"
+          >
+            Repete todo mês
+          </button>
+          <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+            É a parcela
+            <input aria-label="Parcela" inputMode="numeric" value={atual} onChange={(e) => setAtual(e.target.value)} className="min-h-10 w-14 rounded-lg border border-linha bg-white px-2 text-center" />
+            de
+            <input aria-label="Total de parcelas" inputMode="numeric" value={total} onChange={(e) => setTotal(e.target.value)} className="min-h-10 w-14 rounded-lg border border-linha bg-white px-2 text-center" />
+            <button
+              type="button"
+              disabled={salvando || !total}
+              onClick={() =>
+                fazer(() =>
+                  api(`/lancamentos/${id}/repetir/`, { method: 'POST', body: { tipo: 'parcelada', parcela_atual: Number(atual), parcela_total: Number(total) } }),
+                )
+              }
+              className="min-h-10 cursor-pointer rounded-lg bg-tinta px-3 font-bold text-white disabled:opacity-60"
+            >
+              Salvar
+            </button>
+          </span>
+        </>
+      )}
+      {erro && <span className="text-sm font-semibold text-ambar-texto">{erro}</span>}
+      <button type="button" onClick={() => setAberto(false)} className="min-h-8 cursor-pointer self-start text-sm font-semibold text-suave">
+        Fechar
+      </button>
+    </span>
+  )
 }
 
 /** "Excluir" com confirmação; parcelas e recorrentes perguntam se vão também as próximas. */
@@ -158,6 +263,7 @@ export default function Lancamentos() {
       pago: l.pago,
       tipo: l.tipo,
       lancamento: l.id,
+      categoria: l.categoria,
       parcela: l.parcela_total ? `parcela ${l.parcela_atual} de ${l.parcela_total}` : l.tipo === 'recorrente' ? 'todo mês' : undefined,
     }))
     for (const f of faturas.dados ?? []) {
@@ -265,7 +371,7 @@ export default function Lancamentos() {
             valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
             extra={l.parcela && <span className="text-sm text-suave">{l.parcela}</span>}
             para={l.para}
-            acao={acaoDa(l, hoje, recarregar)}
+            acao={acaoDa(l, hoje, recarregar, cad.categorias)}
           />
         ))}
       </div>

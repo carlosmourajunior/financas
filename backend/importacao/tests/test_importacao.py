@@ -244,3 +244,27 @@ class ApiTests(APITestCase):
         r = self.client.post("/api/importar/fatura/", {"arquivo": arquivo, "cartao": self.cartao.id}, format="multipart")
         self.assertEqual(r.status_code, 400)
         self.assertIn("arquivo", r.data)
+
+
+class FaturaAbertaMantemParcelasTests(TestCase):
+    """A fatura aberta vinda do banco traz só as compras novas; as parcelas antigas continuam nela."""
+
+    def test_parcelas_previstas_ficam_no_total_da_aberta(self):
+        from datetime import timedelta
+
+        from financas.servicos import fatura_aberta, somar_meses
+
+        u = get_user_model().objects.create_user(email="p@exemplo.com", password="senha-forte-123")
+        cartao = Cartao.objects.create(dono=u, nome="Nubank", limite=1_000_000, dia_fechamento=8, dia_vencimento=15)
+        hoje = date.today()
+        aberta = fatura_aberta(cartao, hoje)
+        anterior = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, 8))
+        # Fatura fechada: parcela 2 de 3 de uma compra antiga; cria a 3/3 na fatura aberta.
+        confirmar(cartao, anterior.fecha, [{"data": anterior.fecha, "descricao": "Geladeira", "valor": 50_000, "natureza": "despesa", "parcela_atual": 2, "parcela_total": 3}])
+        # Fatura aberta do banco: só a compra nova.
+        nova = {"data": max(aberta.abre, min(hoje, aberta.fecha) - timedelta(days=0)), "descricao": "Mercado", "valor": 20_000, "natureza": "despesa"}
+        confirmar(cartao, aberta.fecha, [nova])
+        confirmar(cartao, aberta.fecha, [nova])  # importar de novo não duplica nem apaga a parcela
+        no_ciclo = Lancamento.objects.filter(cartao=cartao, data__gte=aberta.abre, data__lte=aberta.fecha)
+        self.assertEqual(sorted(no_ciclo.values_list("descricao", "valor")), [("Geladeira", 50_000), ("Mercado", 20_000)])
+        self.assertEqual(fatura_que_fecha_em(cartao, aberta.fecha).total, 70_000)

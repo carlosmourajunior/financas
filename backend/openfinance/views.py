@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, Natureza, PagamentoFatura
-from financas.servicos import fatura_aberta, fatura_que_fecha_em, fechamento_de
+from financas.servicos import fatura_aberta
 from importacao.extrato import Classe, confirmar_extrato, previa_extrato
 from importacao.leitores.base import normalizar
 from importacao.servicos import confirmar, previa
@@ -123,9 +123,11 @@ class PreviaFaturaView(APIView):
 
         if escolhida == ABERTA:
             ciclo = fatura_aberta(cartao, date.today())
-            transacoes = _chamar(pluggy.transacoes, conta.id, ciclo.abre, ciclo.fecha)
+            desde = _desde_o_fechamento(fechadas, ciclo.abre)
+            # Até um ano à frente: as parcelas futuras vêm com a data projetada do mês delas.
+            transacoes = _chamar(pluggy.transacoes, conta.id, desde - timedelta(days=45), ciclo.fecha + timedelta(days=366))
             ids = {b["id"] for b in fechadas}
-            lida = conversao.fatura_aberta(conta.nome, final, ids, ciclo.abre, ciclo.fecha, ciclo.vence, transacoes)
+            lida = conversao.fatura_aberta(conta.nome, final, ids, desde, ciclo.fecha, ciclo.vence, transacoes)
         else:
             fatura = next((b for b in fechadas if b["id"] == escolhida), None)
             if not fatura:
@@ -169,6 +171,12 @@ class PreviaExtratoView(APIView):
             raise ValidationError({"desde": "Nenhum movimento neste período."})
         Vinculo.objects.update_or_create(conta=local, defaults={"dono": request.user, "pluggy_conta": conta.id, "cartao": None})
         return Response(previa_extrato(local, lido))
+
+
+def _desde_o_fechamento(fechadas: list[dict], abre: date) -> date:
+    """Compras à vista entram na aberta a partir do dia seguinte ao último fechamento do banco."""
+    ultimo = conversao.ultimo_fechamento(fechadas)
+    return ultimo + timedelta(days=1) if ultimo else abre
 
 
 def _dia(d: date | None) -> int | None:
@@ -339,17 +347,14 @@ def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
         fechadas = _chamar(pluggy.faturas, c.id)
         no_periodo = [b for b in fechadas if b.get("dueDate") and date.fromisoformat(b["dueDate"][:10]) >= desde]
         aberta = fatura_aberta(cartao, hoje)
-        transacoes = _chamar(pluggy.transacoes, c.id, desde - timedelta(days=45), aberta.fecha)
+        inicio_aberta = _desde_o_fechamento(fechadas, aberta.abre)
+        transacoes = _chamar(pluggy.transacoes, c.id, min(desde, inicio_aberta) - timedelta(days=45), aberta.fecha + timedelta(days=366))
         final = pluggy.final_do_cartao(c.numero)
         lidas = [conversao.fatura_fechada(cartao.nome, final, fechadas, b, transacoes) for b in no_periodo]
-        # O que a Pluggy ainda não pôs em fatura fechada: a aberta e, se a última fechou há pouco,
-        # a que fechou no app mas o banco ainda não listou. Cada uma no seu ciclo.
+        # O que ainda não está em fatura fechada vai todo para a aberta (com a próxima parcela de cada
+        # compra); as parcelas seguintes viram previsão nas próximas faturas.
         ids = {b["id"] for b in fechadas}
-        soltas = [t for t in transacoes if (t.get("creditCardMetadata") or {}).get("billId") not in ids]
-        ciclos = sorted({fechamento_de(cartao, max(conversao._data(t), desde)) for t in soltas} | {aberta.fecha})
-        for fecha in ciclos:
-            f = fatura_que_fecha_em(cartao, fecha)
-            lidas.append(conversao.fatura_aberta(cartao.nome, final, ids, f.abre, f.fecha, f.vence, transacoes))
+        lidas.append(conversao.fatura_aberta(cartao.nome, final, ids, inicio_aberta, aberta.fecha, aberta.vence, transacoes))
         for lida in lidas:
             if not lida.itens:
                 continue

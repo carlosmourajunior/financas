@@ -89,15 +89,41 @@ def fatura_fechada(nome: str, final: str, conta_faturas: list[dict], fatura: dic
     )
 
 
-def fatura_aberta(nome: str, final: str, ids_fechadas: set[str], abre: date, fecha: date, vence: date, transacoes: list[dict]) -> FaturaLida:
-    """O que já entrou na fatura que ainda não fechou: sem fatura ou de fatura que a Pluggy ainda não listou."""
-    escolhidas = [
-        t
-        for t in transacoes
-        if (t.get("creditCardMetadata") or {}).get("billId") not in ids_fechadas and abre <= _data(t) <= fecha
-    ]
+def _compra(t: dict) -> tuple:
+    """Identifica a compra parcelada em todas as parcelas: descrição sem o 3/10, total e data da compra."""
+    meta = t.get("creditCardMetadata") or {}
+    descricao = _PARCELA_NO_FIM.sub("", t.get("description") or t.get("descriptionRaw") or "")
+    return (normalizar(descricao), meta.get("totalInstallments"), (meta.get("purchaseDate") or "")[:10] or centavos(t.get("amount")))
+
+
+def fatura_aberta(nome: str, final: str, ids_fechadas: set[str], desde: date, fecha: date, vence: date, transacoes: list[dict]) -> FaturaLida:
+    """O que vai entrar na fatura que ainda não fechou: compras novas e a próxima parcela de cada compra antiga.
+
+    A Pluggy lista as parcelas futuras ainda sem fatura, cada uma num dia projetado do mês dela, que não
+    bate com o ciclo do cartão. Por isso a parcela da fatura aberta é a menor de cada compra que ainda não
+    está numa fatura fechada; as seguintes viram previsão ao importar. Compras à vista: pela data, desde o
+    último fechamento informado pelo banco.
+    """
+    com_fatura = any((t.get("creditCardMetadata") or {}).get("billId") for t in transacoes)
+    soltas = [t for t in transacoes if (t.get("creditCardMetadata") or {}).get("billId") not in ids_fechadas]
+    escolhidas, proxima_parcela = [], {}
+    for t in soltas:
+        meta = t.get("creditCardMetadata") or {}
+        atual, total = meta.get("installmentNumber"), meta.get("totalInstallments")
+        if com_fatura and atual and total and total > 1:
+            chave = _compra(t)
+            if chave not in proxima_parcela or atual < proxima_parcela[chave]["creditCardMetadata"]["installmentNumber"]:
+                proxima_parcela[chave] = t
+        elif desde <= _data(t) <= fecha:
+            escolhidas.append(t)
+    escolhidas += proxima_parcela.values()
     itens = [i for i in map(item_da_fatura, escolhidas) if i]
     return FaturaLida(banco=nome, itens=sorted(itens, key=lambda i: i.data), total=None, vencimento=vence, final=final)
+
+
+def ultimo_fechamento(faturas: list[dict]) -> date | None:
+    datas = [date.fromisoformat((b.get("billClosingDate") or b.get("dueDate"))[:10]) for b in faturas if b.get("billClosingDate") or b.get("dueDate")]
+    return max(datas) if datas else None
 
 
 _APLICACAO = ("aplicacao automatica", "resgate automatico", "rende facil", "aplic aut", "resg aut")

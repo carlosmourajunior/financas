@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, Natureza
-from financas.servicos import somar_meses
+from financas.servicos import fecha_do_mes, somar_meses
 
 from .extrato import Classe, confirmar_extrato, previa_extrato
 from .leitores import FormatoDesconhecido, ler_extrato, ler_fatura
@@ -82,7 +82,7 @@ class ConfirmarFaturaView(APIView):
         s.is_valid(raise_exception=True)
         cartao = cartao_do_usuario(request, s.validated_data["cartao"])
         fecha = s.validated_data["fecha"]
-        if fecha != somar_meses(fecha, 0, cartao.dia_fechamento):
+        if fecha != fecha_do_mes(cartao, fecha, 0):
             raise ValidationError({"fecha": "Não é um dia de fechamento deste cartão."})
         resultado = confirmar(cartao, s.validated_data["fecha"], s.validated_data["itens"])
         return Response(resultado, status=status.HTTP_201_CREATED)

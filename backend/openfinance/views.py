@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, Natureza, PagamentoFatura
-from financas.servicos import fatura_aberta
+from financas.servicos import fatura_aberta, fecha_do_mes
 from importacao.extrato import Classe, confirmar_extrato, previa_extrato
 from importacao.leitores.base import normalizar
 from importacao.servicos import confirmar, previa
@@ -121,6 +121,7 @@ class PreviaFaturaView(APIView):
         conta = _chamar(_conta_pluggy, s.validated_data["pluggy"], "CREDIT")
         escolhida = s.validated_data["fatura"]
         fechadas = _chamar(pluggy.faturas, conta.id)
+        registrar_fechamentos(cartao, fechadas)
         final = conta.numero[-4:] if conta.numero[-4:].isdigit() else ""
 
         if escolhida == ABERTA:
@@ -174,6 +175,30 @@ class PreviaExtratoView(APIView):
             raise ValidationError({"desde": "Nenhum movimento neste período."})
         Vinculo.objects.update_or_create(conta=local, defaults={"dono": request.user, "pluggy_conta": conta.id, "cartao": None})
         return Response(previa_extrato(local, lido))
+
+
+def registrar_fechamentos(cartao: Cartao, fechadas: list[dict]) -> None:
+    """Guarda o dia em que cada fatura fechou de verdade (no Itaú varia entre 23, 24 e 25).
+
+    Assim cada fatura do app tem as mesmas compras que a do banco. O pagamento já registrado
+    acompanha a fatura para o novo dia.
+    """
+    salvos = dict(cartao.fechamentos or {})
+    fechamentos = dict(salvos)
+    for b in fechadas:
+        d = _data_iso(b.get("billClosingDate"))
+        if not d:
+            continue
+        chave = f"{d.year}-{d.month:02d}"
+        if fechamentos.get(chave) == d.day:
+            continue
+        antes = fecha_do_mes(cartao, d)
+        fechamentos[chave] = d.day
+        if antes != d and not PagamentoFatura.objects.filter(cartao=cartao, fecha=d).exists():
+            PagamentoFatura.objects.filter(cartao=cartao, fecha=antes).update(fecha=d)
+    if fechamentos != salvos:
+        cartao.fechamentos = fechamentos
+        Cartao.objects.filter(pk=cartao.pk).update(fechamentos=fechamentos)
 
 
 def _desde_o_fechamento(fechadas: list[dict], abre: date) -> date:
@@ -356,6 +381,7 @@ def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
             feito["pulados"].append(f"{cartao}: confira os dias de fechamento e vencimento")
             continue
         fechadas = _chamar(pluggy.faturas, c.id)
+        registrar_fechamentos(cartao, fechadas)
         no_periodo = [b for b in fechadas if b.get("dueDate") and date.fromisoformat(b["dueDate"][:10]) >= desde]
         aberta = fatura_aberta(cartao, hoje)
         inicio_aberta = _desde_o_fechamento(fechadas, aberta.abre)

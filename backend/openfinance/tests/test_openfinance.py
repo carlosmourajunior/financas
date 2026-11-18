@@ -485,3 +485,27 @@ class TotalDoBancoTests(APITestCase):
         ]
         lida = conversao.fatura_aberta("Itau", "", {"f"}, date(2026, 10, 24), date(2026, 11, 23), date(2026, 12, 1), transacoes)
         self.assertEqual(sorted(i.valor for i in lida.itens), [-2_000, 10_000])
+
+
+class FechamentoDeCadaFaturaTests(APITestCase):
+    """O Itaú fecha no 23, 24 ou 25 conforme o mês: cada fatura do app usa o dia que o banco informou."""
+
+    def test_fatura_fechada_usa_o_dia_do_banco(self):
+        from financas.models import PagamentoFatura
+        from financas.servicos import fatura_aberta, fatura_que_fecha_em
+        from openfinance.views import registrar_fechamentos
+
+        u = get_user_model().objects.create_user(email="i@exemplo.com", password="senha-forte-123")
+        cartao = Cartao.objects.create(dono=u, nome="Itaú Azul", limite=1_000_000, dia_fechamento=23, dia_vencimento=1)
+        PagamentoFatura.objects.create(dono=u, cartao=cartao, fecha=date(2026, 10, 23), valor=100, data=date(2026, 11, 1))
+        registrar_fechamentos(cartao, [{"id": "a", "dueDate": "2026-11-01", "billClosingDate": "2026-10-25T00:00:00Z"},
+                                       {"id": "b", "dueDate": "2026-10-01", "billClosingDate": "2026-09-24T00:00:00Z"}])
+        cartao.refresh_from_db()
+        self.assertEqual(cartao.fechamentos, {"2026-10": 25, "2026-09": 24})
+        outubro = fatura_que_fecha_em(cartao, date(2026, 10, 25))
+        self.assertEqual((outubro.abre, outubro.fecha), (date(2026, 9, 25), date(2026, 10, 25)))
+        # A aberta começa no dia seguinte ao fechamento real e fecha no dia de costume.
+        aberta = fatura_aberta(cartao, date(2026, 11, 18))
+        self.assertEqual((aberta.abre, aberta.fecha), (date(2026, 10, 26), date(2026, 11, 23)))
+        # O pagamento registrado foi junto para o novo dia.
+        self.assertTrue(PagamentoFatura.objects.filter(cartao=cartao, fecha=date(2026, 10, 25)).exists())

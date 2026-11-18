@@ -15,7 +15,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, Natureza, PagamentoEmprestimo, PagamentoFatura, Recorrencia
-from financas.servicos import _vencimento, gerar_ocorrencias, somar_meses
+from financas.servicos import _vencimento, fecha_do_mes, gerar_ocorrencias, somar_meses
 
 from .leitores import ExtratoLido, Movimento
 from .leitores.base import normalizar
@@ -50,7 +50,7 @@ def chave_do_movimento(m: Movimento, ordem: int = 1) -> str:
 
 def fatura_paga_em(cartao: Cartao, data: date) -> date:
     """Fechamento da fatura cujo vencimento fica mais perto do dia do pagamento."""
-    candidatas = [somar_meses(data, -m, cartao.dia_fechamento) for m in range(-1, 3)]
+    candidatas = [fecha_do_mes(cartao, data, -m) for m in range(-1, 3)]
     return min(candidatas, key=lambda f: abs((_vencimento(cartao, f) - data).days))
 
 

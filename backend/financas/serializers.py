@@ -1,8 +1,9 @@
+import re
 from datetime import date
 
 from rest_framework import serializers
 
-from .models import Cartao, Categoria, Conta, Emprestimo, Frequencia, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
+from .models import Cartao, Categoria, Conta, Emprestimo, Frequencia, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia, cor_padrao
 from .servicos import criar_parcelas, fatura_que_fecha_em, fecha_do_mes, gerar_ocorrencias, somar_meses, vencimentos_das_parcelas
 
 
@@ -40,7 +41,25 @@ class CartaoSerializer(serializers.ModelSerializer):
 class CategoriaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Categoria
-        fields = ["id", "nome", "natureza"]
+        fields = ["id", "nome", "natureza", "cor"]
+        extra_kwargs = {"cor": {"required": False}}
+
+    def validate_nome(self, valor):
+        valor = valor.strip()
+        if not valor:
+            raise serializers.ValidationError("Dê um nome à categoria.")
+        return valor
+
+    def validate_cor(self, valor):
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", valor or ""):
+            raise serializers.ValidationError("Escolha uma cor no formato #RRGGBB.")
+        return valor.upper()
+
+    def create(self, dados):
+        if "cor" not in dados:
+            usadas = Categoria.objects.filter(dono=self.context["request"].user).count()
+            dados["cor"] = cor_padrao(dados.get("nome", ""), usadas)
+        return super().create(dados)
 
     def validate(self, dados):
         dono = self.context["request"].user

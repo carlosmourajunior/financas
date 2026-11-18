@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { SeletorCategoria } from '../components/Categorias'
 import { Erro } from '../components/Formularios'
 import Icon from '../components/Icon'
 import { Abas, Campo, botaoPrimario, campo } from '../components/ui'
@@ -41,7 +42,6 @@ export default function NovoLancamento() {
   const porParcela = parcelas > 0 ? Math.round(total / parcelas) : 0
   const d = lerData(data)
   const ultima = new Date(d.getFullYear(), d.getMonth() + parcelas - 1, 1)
-  const categorias = cad.categorias.filter((c) => c.natureza === natureza)
   const meioEscolhido = meio || (cad.contas[0] ? `conta:${cad.contas[0].id}` : '')
   const pago = jaPago ?? data <= isoData(new Date())
   // Compra no cartão é paga na fatura. Parcelas e recorrentes seguem a data: as que já passaram contam como pagas.
@@ -196,16 +196,17 @@ export default function NovoLancamento() {
             className={campo}
           />
         </Campo>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Campo label="Categoria">
-            <select value={categoria} onChange={(e) => setCategoria(e.target.value)} className={campo}>
-              <option value="">Sem categoria</option>
-              {categorias.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nome}
-                </option>
-              ))}
-            </select>
+            <SeletorCategoria
+              valor={categoria ? Number(categoria) : null}
+              natureza={natureza}
+              categorias={cad.categorias}
+              aoEscolher={(id) => setCategoria(id ? String(id) : '')}
+              aoCriar={cad.recarregarCategorias}
+              envoltorio="flex w-full items-center gap-2"
+              className={campo}
+            />
           </Campo>
           <Campo label={tipo === 'parcelada' ? 'Primeira parcela' : tipo === 'recorrente' ? 'Começa em' : 'Data'}>
             <input type="date" required value={data} onChange={(e) => setData(e.target.value)} className={campo} />

@@ -26,6 +26,12 @@ const paths = {
       <path d="m20 20-3.5-3.5" />
     </>
   ),
+  etiqueta: (
+    <>
+      <path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z" />
+      <circle cx="7.5" cy="7.5" r="1.5" />
+    </>
+  ),
   emprestimo: <path d="M7 7h11l-3-3M17 17H6l3 3" />,
   arquivo: <path d="M14 3H6v18h12V7zM14 3v4h4M12 17v-6M9.5 13.5 12 11l2.5 2.5" />,
   camera: (

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { NovaCategoria } from '../components/Categorias'
 import { Erro, FormConta } from '../components/Formularios'
 import { FormEmprestimo } from './Emprestimos'
 import { BuscarExtrato, EscolherOrigem } from '../components/OpenFinance'
@@ -280,8 +281,8 @@ export default function ImportarExtrato({ openFinance }: { openFinance: ReturnTy
 
           <div className="flex flex-col gap-2">
             <p className="text-[15px] text-suave">
-              {marcados.length} para lançar: entram <strong className="text-musgo">{moeda(entram)}</strong> e saem{' '}
-              <strong className="text-tinta">{moeda(saem)}</strong>
+              {marcados.length} para lançar: entram <strong className="text-credito">{moeda(entram)}</strong> e saem{' '}
+              <strong className="text-debito">{moeda(saem)}</strong>
             </p>
             <button onClick={importar} disabled={gravando || marcados.length === 0} className={`${botaoPrimario} disabled:opacity-60`}>
               {gravando ? 'Importando…' : `Importar ${marcados.length} movimentos`}
@@ -328,7 +329,7 @@ function Linha({
       <span className="flex min-w-0 grow flex-col gap-1.5">
         <span className="flex items-baseline justify-between gap-3">
           <span className="min-w-0 text-base font-bold break-words">{l.descricao}</span>
-          <span className={`shrink-0 text-base font-bold tabular-nums ${l.natureza === 'receita' ? 'text-musgo' : ''}`}>
+          <span className={`shrink-0 text-base font-bold tabular-nums ${l.natureza === 'receita' ? 'text-credito' : 'text-debito'}`}>
             {l.natureza === 'receita' ? `+ ${moeda(l.valor)}` : moeda(l.valor)}
           </span>
         </span>
@@ -428,6 +429,7 @@ function Linha({
             {lanca && criando && (
               <NovaCategoria
                 natureza={l.classe as 'despesa' | 'receita'}
+                categorias={categorias}
                 aoCancelar={() => setCriando(false)}
                 aoCriar={(c) => {
                   setCriando(false)
@@ -517,56 +519,6 @@ function Janela({ titulo, aoFechar, children }: { titulo: string; aoFechar: () =
         {children}
       </div>
     </div>
-  )
-}
-
-function NovaCategoria({
-  natureza,
-  aoCriar,
-  aoCancelar,
-}: {
-  natureza: 'despesa' | 'receita'
-  aoCriar: (c: Categoria) => void
-  aoCancelar: () => void
-}) {
-  const [nome, setNome] = useState('')
-  const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
-
-  async function criar() {
-    if (!nome.trim()) return
-    setSalvando(true)
-    setErro(null)
-    try {
-      aoCriar(await api<Categoria>('/categorias/', { method: 'POST', body: { nome: nome.trim(), natureza } }))
-    } catch (err) {
-      setErro((err as Error).message || 'Não foi possível criar.')
-      setSalvando(false)
-    }
-  }
-
-  return (
-    <span className="flex flex-wrap items-center gap-2">
-      <input
-        autoFocus
-        aria-label="Nome da nova categoria"
-        placeholder={natureza === 'receita' ? 'Ex.: Aluguel recebido' : 'Ex.: Escola'}
-        value={nome}
-        onChange={(e) => setNome(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') criar()
-          if (e.key === 'Escape') aoCancelar()
-        }}
-        className="min-h-9 w-40 rounded-lg border border-linha px-2 text-sm text-tinta"
-      />
-      <button onClick={criar} disabled={salvando} className="min-h-9 cursor-pointer rounded-lg bg-tinta px-3 text-sm font-bold text-white">
-        Criar
-      </button>
-      <button onClick={aoCancelar} className="min-h-9 cursor-pointer px-1 text-sm font-semibold text-suave">
-        Cancelar
-      </button>
-      {erro && <span className="w-full text-sm text-ambar-texto">{erro}</span>}
-    </span>
   )
 }
 

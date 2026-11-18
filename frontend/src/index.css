@@ -3,6 +3,11 @@
 @theme {
   --color-tinta: #12343b;
   --color-musgo: #2f6b4f;
+  /* Dinheiro que entra (crédito) em azul; que sai (débito) e saldo negativo em vermelho. */
+  --color-credito: #1d5fa6;
+  --color-debito: #b42318;
+  /* Vermelho para o fundo azul-petróleo do topo do Início. */
+  --color-debito-claro: #ffa8a0;
   --color-ambar: #c9822b;
   --color-ambar-texto: #8a5413;
   --color-fundo: #fbfcfc;

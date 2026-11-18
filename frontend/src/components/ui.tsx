@@ -64,10 +64,21 @@ export function Abas<T extends string>({
   )
 }
 
-export function Barra({ largura, cor = 'bg-tinta', altura = 'h-2' }: { largura: string; cor?: string; altura?: string }) {
+export function Barra({
+  largura,
+  cor = 'bg-tinta',
+  corHex,
+  altura = 'h-2',
+}: {
+  largura: string
+  cor?: string
+  /** Cor exata (a da categoria, por exemplo); tem prioridade sobre `cor`. */
+  corHex?: string
+  altura?: string
+}) {
   return (
     <div className={`${altura} rounded-full bg-linha`}>
-      <div className={`${altura} rounded-full ${cor}`} style={{ width: largura }} />
+      <div className={`${altura} rounded-full ${corHex ? '' : cor}`} style={{ width: largura, backgroundColor: corHex }} />
     </div>
   )
 }

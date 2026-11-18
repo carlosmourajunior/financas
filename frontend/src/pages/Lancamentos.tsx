@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
+import { RotuloCategoria, SeletorCategoria } from '../components/Categorias'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Titulo } from '../components/ui'
@@ -28,7 +29,7 @@ interface Linha {
   chave: string
   data: string
   titulo: string
-  detalhe: string
+  detalhe: ReactNode
   valor: number
   natureza: 'despesa' | 'receita'
   pago: boolean
@@ -51,7 +52,7 @@ function situacao(l: Linha, hoje: string) {
 }
 
 /** O botão de pagar ou desfazer da linha, ou nada. */
-function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categoria[]) {
+function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categoria[], aoCriarCategoria: () => void) {
   const f = l.fatura
   if (f) {
     if (f.pagamento) return <BotaoPagar discreto rotulo="Desfazer pagamento" acao={() => desfazerPagamentoFatura(f.pagamento!.id)} aoMudar={aoMudar} />
@@ -78,7 +79,7 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categor
       antes={
         <>
           {pagar}
-          <Ajustar l={l} id={id} categorias={categorias.filter((c) => c.natureza === l.natureza)} aoMudar={aoMudar} />
+          <Ajustar l={l} id={id} categorias={categorias} aoMudar={aoMudar} aoCriarCategoria={aoCriarCategoria} />
         </>
       }
     />
@@ -86,7 +87,19 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categor
 }
 
 /** Categoria e, para um lançamento único (vindo do banco, por exemplo), marcar como recorrente ou parcela. */
-function Ajustar({ l, id, categorias, aoMudar }: { l: Linha; id: number; categorias: Categoria[]; aoMudar: () => void }) {
+function Ajustar({
+  l,
+  id,
+  categorias,
+  aoMudar,
+  aoCriarCategoria,
+}: {
+  l: Linha
+  id: number
+  categorias: Categoria[]
+  aoMudar: () => void
+  aoCriarCategoria: () => void
+}) {
   const [aberto, setAberto] = useState(false)
   const [atual, setAtual] = useState('1')
   const [total, setTotal] = useState('')
@@ -121,24 +134,20 @@ function Ajustar({ l, id, categorias, aoMudar }: { l: Linha; id: number; categor
   const unico = l.tipo === 'unica'
   return (
     <span className="flex w-full flex-col gap-2.5 rounded-[10px] bg-nevoa px-3 py-3">
-      <label className="flex flex-col gap-1 text-sm font-semibold">
+      <span className="flex flex-col gap-1 text-sm font-semibold">
         Categoria
-        <select
-          value={l.categoria ?? ''}
+        <SeletorCategoria
+          rotulo={`Categoria de ${l.titulo}`}
+          valor={l.categoria}
+          natureza={l.natureza}
+          categorias={categorias}
           disabled={salvando}
-          onChange={(e) =>
-            fazer(() => api(`/lancamentos/${id}/`, { method: 'PATCH', body: { categoria: e.target.value ? Number(e.target.value) : null } }))
-          }
-          className="min-h-10 rounded-lg border border-linha bg-white px-2 text-[15px] font-normal"
-        >
-          <option value="">Sem categoria</option>
-          {categorias.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nome}
-            </option>
-          ))}
-        </select>
-      </label>
+          aoEscolher={(categoria) => fazer(() => api(`/lancamentos/${id}/`, { method: 'PATCH', body: { categoria } }))}
+          aoCriar={aoCriarCategoria}
+          envoltorio="flex w-full items-center gap-2"
+          className="min-h-10 w-full rounded-lg border border-linha bg-white px-2 text-[15px] font-normal"
+        />
+      </span>
       {unico && (
         <>
           <button
@@ -222,7 +231,7 @@ function NovoBotoes() {
       </Link>
       <Link
         to="/lancamentos/novo?natureza=receita"
-        className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-musgo px-3.5 text-[15px] font-bold text-white"
+        className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-credito px-3.5 text-[15px] font-bold text-white"
       >
         <Icon name="mais" size={18} strokeWidth={2} />
         Recebimento
@@ -257,7 +266,11 @@ export default function Lancamentos() {
       chave: `l${l.id}`,
       data: l.data,
       titulo: l.descricao,
-      detalhe: l.natureza === 'receita' ? cad.meio(l) : `${cad.categoria(l)}, ${cad.meio(l)}`,
+      detalhe: (
+        <>
+          <RotuloCategoria nome={cad.categoria(l)} cor={cad.cor(l.categoria)} />, {cad.meio(l)}
+        </>
+      ),
       valor: l.valor,
       natureza: l.natureza,
       pago: l.pago,
@@ -324,11 +337,11 @@ export default function Lancamentos() {
       <p className="flex flex-wrap gap-x-7 gap-y-2">
         <span className="flex flex-col">
           <span className="text-sm text-suave">Entrou</span>
-          <span className="font-display text-[22px] font-bold text-musgo tabular-nums">{moeda(entrou)}</span>
+          <span className="font-display text-[22px] font-bold text-credito tabular-nums">{moeda(entrou)}</span>
         </span>
         <span className="flex flex-col">
           <span className="text-sm text-suave">Saiu</span>
-          <span className="font-display text-[22px] font-bold tabular-nums">{moeda(saiu)}</span>
+          <span className="font-display text-[22px] font-bold text-debito tabular-nums">{moeda(saiu)}</span>
         </span>
         <span className="flex flex-col">
           <span className="text-sm text-suave">Falta pagar</span>
@@ -349,6 +362,13 @@ export default function Lancamentos() {
             {f.label}
           </button>
         ))}
+        <Link
+          to="/categorias"
+          className="flex min-h-[38px] items-center gap-1.5 rounded-[10px] border border-dashed border-borda px-3.5 text-[15px] font-semibold text-suave hover:bg-nevoa"
+        >
+          <Icon name="etiqueta" size={16} />
+          Categorias
+        </Link>
       </div>
 
       <div className="flex flex-col pt-2">
@@ -368,10 +388,10 @@ export default function Lancamentos() {
             situacao={situacao(l, hoje)}
             alerta={!l.pago && l.natureza === 'despesa'}
             valor={l.natureza === 'receita' ? `+ ${moeda(Math.abs(l.valor))}` : moeda(l.valor)}
-            valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
+            valorClasse={l.natureza === 'receita' ? 'text-credito' : 'text-debito'}
             extra={l.parcela && <span className="text-sm text-suave">{l.parcela}</span>}
             para={l.para}
-            acao={acaoDa(l, hoje, recarregar, cad.categorias)}
+            acao={acaoDa(l, hoje, recarregar, cad.categorias, cad.recarregarCategorias)}
           />
         ))}
       </div>

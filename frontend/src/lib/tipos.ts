@@ -30,6 +30,7 @@ export interface Categoria {
   id: number
   nome: string
   natureza: Natureza
+  cor: string
 }
 
 export interface Lancamento {
@@ -64,7 +65,7 @@ export interface Resumo {
   vencem_hoje: Pendencia[]
   entrou: number
   saiu: number
-  categorias: { nome: string; valor: number }[]
+  categorias: { id: number | null; nome: string; cor: string; valor: number }[]
   parcelas_anteriores: number
   creditos_cartao: number
   sai_da_conta: number
@@ -227,6 +228,7 @@ export interface MovimentoEmConta {
   pago: boolean
   tipo: Tipo
   categoria: string | null
+  categoria_cor: string | null
   conta: number | null
   conta_nome: string | null
   parcela_atual: number | null

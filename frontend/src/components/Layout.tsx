@@ -8,12 +8,13 @@ const itens: { to: string; label: string; icon: IconName }[] = [
   { to: '/contas', label: 'Contas', icon: 'banco' },
   { to: '/cartoes', label: 'Cartões', icon: 'cartao' },
   { to: '/emprestimos', label: 'Empréstimos', icon: 'emprestimo' },
+  { to: '/categorias', label: 'Categorias', icon: 'etiqueta' },
   { to: '/importar', label: 'Importar', icon: 'importar' },
 ]
 
 // No celular a barra inferior tem espaço para quatro itens e o botão de lançar.
-// Importar fica nas telas de Contas (extrato) e Cartões (fatura).
-const itensCelular = itens.filter((i) => i.to !== '/emprestimos' && i.to !== '/importar')
+// Importar fica nas telas de Contas (extrato) e Cartões (fatura); Categorias, em Lançamentos.
+const itensCelular = itens.filter((i) => !['/emprestimos', '/importar', '/categorias'].includes(i.to))
 
 function iniciais(nome: string) {
   return nome

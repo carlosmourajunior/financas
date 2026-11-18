@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
 import { FormCartao } from '../components/Formularios'
+import { TrazerDoBanco } from '../components/OpenFinance'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Abas, Barra, Secao, Segmentos, Titulo, botaoSecundario } from '../components/ui'
@@ -74,7 +75,13 @@ export default function Cartoes() {
         <p className="text-[17px] leading-snug text-suave">
           {c ? 'Novo cartão' : 'Cadastre seu cartão para acompanhar a fatura, o limite e as parcelas que ainda vêm.'}
         </p>
-        <div className="max-w-xl">
+        <div className="flex max-w-xl flex-col gap-4">
+          <TrazerDoBanco
+            aoTrazer={() => {
+              setNovo(false)
+              lista.recarregar()
+            }}
+          />
           <FormCartao aoSalvar={salvo} />
         </div>
       </div>

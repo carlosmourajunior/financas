@@ -6,11 +6,13 @@ pela mesma revisão e pela mesma regra de repetidos.
 
 from datetime import date, timedelta
 
+from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from financas.models import Cartao, Conta
 from financas.servicos import fatura_aberta
 from importacao.extrato import previa_extrato
 from importacao.servicos import previa
@@ -153,3 +155,45 @@ class PreviaExtratoView(APIView):
             raise ValidationError({"desde": "Nenhum movimento neste período."})
         Vinculo.objects.update_or_create(conta=local, defaults={"dono": request.user, "pluggy_conta": conta.id, "cartao": None})
         return Response(previa_extrato(local, lido))
+
+
+def _dia(d: date | None, padrao: int) -> int:
+    # O app guarda dias de 1 a 28 (fevereiro); dia 29 a 31 vira 28.
+    return min(d.day, 28) if d else padrao
+
+
+@transaction.atomic
+def trazer_contas(dono) -> dict:
+    """Cria no app as contas e cartões da Pluggy que ainda não têm par. Pode rodar quantas vezes quiser."""
+    # Trava o usuário: duas chamadas juntas (a tela abre duas vezes) não criam conta em dobro.
+    type(dono).objects.select_for_update().filter(pk=dono.pk).first()
+    ligadas = set(Vinculo.objects.filter(dono=dono).values_list("pluggy_conta", flat=True))
+    criadas = {"contas": [], "cartoes": []}
+    for c in _chamar(pluggy.contas):
+        if c.id in ligadas:
+            continue
+        if c.tipo == "BANK":
+            tipo = Conta.Tipo.POUPANCA if c.subtipo == "SAVINGS_ACCOUNT" else Conta.Tipo.CORRENTE
+            # Como no cadastro à mão: o saldo de hoje é o ponto de partida.
+            conta = Conta.objects.create(dono=dono, nome=c.nome[:80] or "Conta", tipo=tipo, saldo_inicial=c.saldo)
+            Vinculo.objects.create(dono=dono, conta=conta, pluggy_conta=c.id)
+            criadas["contas"].append(conta.nome)
+        elif c.tipo == "CREDIT":
+            vence = _dia(c.vencimento, 10)
+            # Sem a data do banco, fecha uma semana antes de vencer.
+            fecha = _dia(c.fechamento, vence - 7 if vence > 7 else vence + 21)
+            final = c.numero[-4:] if c.numero[-4:].isdigit() else ""
+            cartao = Cartao.objects.create(
+                dono=dono, nome=c.nome[:40] or "Cartão", final=final, limite=max(c.limite, 0), dia_fechamento=fecha, dia_vencimento=vence
+            )
+            Vinculo.objects.create(dono=dono, cartao=cartao, pluggy_conta=c.id)
+            criadas["cartoes"].append(str(cartao))
+    return criadas
+
+
+class TrazerContasView(APIView):
+    """Cadastra as contas e os cartões conectados na Pluggy, no lugar do cadastro à mão."""
+
+    def post(self, request):
+        _exigir_liberado(request)
+        return Response(trazer_contas(request.user))

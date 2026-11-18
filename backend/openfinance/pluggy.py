@@ -89,6 +89,8 @@ class ContaPluggy:
     nome: str
     numero: str
     saldo: int
+    subtipo: str = ""
+    limite: int = 0  # cartão: limite total
     vencimento: date | None = None  # cartão: vencimento da fatura atual
     fechamento: date | None = None
 
@@ -106,6 +108,8 @@ def contas() -> list[ContaPluggy]:
                     nome=a.get("marketingName") or a.get("name") or "",
                     numero=a.get("number") or "",
                     saldo=centavos(a.get("balance")),
+                    subtipo=a.get("subtype") or "",
+                    limite=centavos(credito.get("creditLimit")),
                     vencimento=_data(credito.get("balanceDueDate")),
                     fechamento=_data(credito.get("balanceCloseDate")),
                 )

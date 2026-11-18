@@ -29,7 +29,7 @@ CONTAS = {
             "name": "Nubank",
             "number": "5555",
             "balance": 300,
-            "creditData": {"balanceDueDate": "2026-11-15T00:00:00.000Z", "balanceCloseDate": "2026-11-08T00:00:00.000Z"},
+            "creditData": {"creditLimit": 5000, "balanceDueDate": "2026-11-15T00:00:00.000Z", "balanceCloseDate": "2026-11-08T00:00:00.000Z"},
         },
     ]
 }
@@ -183,3 +183,39 @@ class LigadoTests(APITestCase):
         alheio = Cartao.objects.create(dono=outro, nome="X", limite=1, dia_fechamento=8, dia_vencimento=15)
         r = self.client.post("/api/openfinance/fatura/", {"cartao": alheio.id, "pluggy": "cartao-1"}, format="json")
         self.assertEqual(r.status_code, 400)
+
+
+@override_settings(**LIGADO)
+@patch("openfinance.pluggy._get", side_effect=api_falsa)
+class TrazerContasTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.usuario = Usuario.objects.create_user(email="eu@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(self.usuario)
+
+    def test_cria_conta_e_cartao_e_nao_repete(self, _):
+        r = self.client.post("/api/openfinance/trazer-contas/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json(), {"contas": ["Conta BB"], "cartoes": ["Nubank 5555"]})
+        conta = Conta.objects.get(dono=self.usuario)
+        self.assertEqual((conta.saldo_inicial, conta.tipo), (152_035, "corrente"))
+        cartao = Cartao.objects.get(dono=self.usuario)
+        self.assertEqual((cartao.final, cartao.limite, cartao.dia_fechamento, cartao.dia_vencimento), ("5555", 500_000, 8, 15))
+        self.assertEqual(Vinculo.objects.get(conta=conta).pluggy_conta, "cc-1")
+        # O estado já mostra cada conta da Pluggy ligada à do app.
+        estado = self.client.get("/api/openfinance/").json()["contas"]
+        self.assertEqual([(c["conta"], c["cartao"]) for c in estado], [(conta.id, None), (None, cartao.id)])
+
+        r = self.client.post("/api/openfinance/trazer-contas/")
+        self.assertEqual(r.json(), {"contas": [], "cartoes": []})
+        self.assertEqual(Conta.objects.filter(dono=self.usuario).count(), 1)
+
+    def test_conta_ja_ligada_a_mao_nao_duplica(self, _):
+        conta = Conta.objects.create(dono=self.usuario, nome="Minha conta")
+        Vinculo.objects.create(dono=self.usuario, conta=conta, pluggy_conta="cc-1")
+        self.assertEqual(self.client.post("/api/openfinance/trazer-contas/").json()["contas"], [])
+
+    def test_outro_usuario_nao_pode(self, _):
+        outro = Usuario.objects.create_user(email="outro@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(outro)
+        self.assertEqual(self.client.post("/api/openfinance/trazer-contas/").status_code, 403)

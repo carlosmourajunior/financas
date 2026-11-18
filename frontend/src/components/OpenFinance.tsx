@@ -1,13 +1,13 @@
 // Buscar fatura e extrato direto do banco (Open Finance pela Pluggy).
 // Só aparece quando o backend tem o módulo ligado para o usuário; a prévia que volta é a mesma da importação de arquivo.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Erro } from './Formularios'
 import Icon from './Icon'
-import { Campo, botaoPrimario, campo } from './ui'
+import { Campo, botaoPrimario, botaoSecundario, campo } from './ui'
 import { api } from '../lib/api'
 import { isoData, porExtenso } from '../lib/datas'
 import { moeda } from '../lib/format'
-import type { ContaPluggy, FaturaPluggy, Origem } from '../lib/openfinance'
+import { useOpenFinance, type ContaPluggy, type ContasTrazidas, type FaturaPluggy, type Origem } from '../lib/openfinance'
 import type { PreviaExtrato, PreviaFatura } from '../lib/tipos'
 import { useApi } from '../lib/useApi'
 
@@ -188,5 +188,53 @@ function BotaoBuscar({ buscando, onClick, disabled, texto }: { buscando: boolean
       <Icon name="buscar" size={20} />
       {buscando ? 'Buscando no banco…' : texto}
     </button>
+  )
+}
+
+/**
+ * Cadastra as contas e os cartões conectados na Pluggy. Some quando o Open Finance está desligado.
+ * Com `automatico`, roda sozinho ao abrir (primeiro acesso); o cadastro à mão continua disponível.
+ */
+export function TrazerDoBanco({ automatico = false, aoTrazer }: { automatico?: boolean; aoTrazer: (r: ContasTrazidas) => void }) {
+  const of = useOpenFinance()
+  const [trazendo, setTrazendo] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
+  const jaRodou = useRef(false)
+
+  async function trazer() {
+    setErro(null)
+    setAviso(null)
+    setTrazendo(true)
+    try {
+      const r = await api<ContasTrazidas>('/openfinance/trazer-contas/', { method: 'POST' })
+      const nomes = [...r.contas, ...r.cartoes]
+      setAviso(nomes.length ? `Trouxemos do banco: ${nomes.join(', ')}.` : 'Tudo o que está conectado no banco já está aqui.')
+      aoTrazer(r)
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível trazer as contas do banco.')
+    } finally {
+      setTrazendo(false)
+    }
+  }
+
+  useEffect(() => {
+    if (automatico && of.ativo && !jaRodou.current) {
+      jaRodou.current = true
+      void trazer()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [automatico, of.ativo])
+
+  if (!of.ativo) return null
+  return (
+    <div className="flex flex-col gap-2">
+      <button onClick={trazer} disabled={trazendo} className={`${botaoSecundario} w-full disabled:opacity-60`}>
+        <Icon name="buscar" size={20} />
+        {trazendo ? 'Buscando no banco…' : 'Trazer contas e cartões do banco'}
+      </button>
+      {aviso && <p className="text-[15px] font-semibold text-musgo">{aviso}</p>}
+      {erro && <Erro>{erro}</Erro>}
+    </div>
   )
 }

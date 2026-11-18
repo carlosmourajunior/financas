@@ -22,6 +22,11 @@ export interface FaturaPluggy {
   total: number
 }
 
+export interface ContasTrazidas {
+  contas: string[]
+  cartoes: string[]
+}
+
 export type Origem = 'arquivo' | 'banco'
 
 /** Se o Open Finance está ligado. Falha na consulta conta como desligado: a importação por arquivo continua. */

@@ -34,6 +34,7 @@ urlpatterns = [
     path("api/importar/extrato/confirmar/", imp.ConfirmarExtratoView.as_view()),
     path("api/openfinance/", of.EstadoView.as_view()),
     path("api/openfinance/faturas/", of.FaturasView.as_view()),
+    path("api/openfinance/trazer-contas/", of.TrazerContasView.as_view()),
     path("api/openfinance/fatura/", of.PreviaFaturaView.as_view()),
     path("api/openfinance/extrato/", of.PreviaExtratoView.as_view()),
     path("api/", include(router.urls)),

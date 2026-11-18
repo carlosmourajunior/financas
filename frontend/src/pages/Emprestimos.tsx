@@ -142,7 +142,7 @@ function ItemEmprestimo({ e, aoMudar }: { e: Emprestimo; aoMudar: () => void }) 
     <div className="flex flex-col gap-2 border-b border-linha py-4">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-[17px] font-bold">{e.nome}</span>
-        <span className={`text-base font-bold tabular-nums ${devo ? '' : 'text-musgo'}`}>
+        <span className={`text-base font-bold tabular-nums ${devo ? 'text-debito' : 'text-credito'}`}>
           {devo && e.parcela_valor ? `${moeda(e.parcela_valor)}/mês` : moeda(e.saldo)}
         </span>
       </div>
@@ -155,7 +155,7 @@ function ItemEmprestimo({ e, aoMudar }: { e: Emprestimo; aoMudar: () => void }) 
       )}
       <Barra
         largura={e.parcelas_total && e.parcelas_pagas !== null ? pct(e.parcelas_pagas, e.parcelas_total) : pct(e.pago, e.valor_total)}
-        cor={devo ? 'bg-tinta' : 'bg-musgo'}
+        cor={devo ? 'bg-tinta' : 'bg-credito'}
       />
       <div className="flex justify-between gap-3 text-sm">
         <span>

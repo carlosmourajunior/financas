@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
+import { RotuloCategoria } from '../components/Categorias'
 import { FormConta } from '../components/Formularios'
 import Icon from '../components/Icon'
 import { TrazerDoBanco } from '../components/OpenFinance'
@@ -87,7 +88,7 @@ export default function Inicio() {
             <Icon name="mais" size={18} strokeWidth={2} />
             Novo pagamento
           </Link>
-          <Link to="/lancamentos/novo?natureza=receita" className="flex min-h-12 items-center gap-2 rounded-xl bg-musgo px-4 text-[15px] font-bold text-white">
+          <Link to="/lancamentos/novo?natureza=receita" className="flex min-h-12 items-center gap-2 rounded-xl bg-credito px-4 text-[15px] font-bold text-white">
             <Icon name="mais" size={18} strokeWidth={2} />
             Novo recebimento
           </Link>
@@ -112,7 +113,11 @@ export default function Inicio() {
                 <BotaoOlho oculto={oculto} onClick={() => setOculto(!oculto)} />
               </span>
             </div>
-            <div className="font-display text-[60px] font-extrabold leading-none tracking-[-2px] tabular-nums lg:text-[76px]">
+            <div
+              className={`font-display text-[60px] font-extrabold leading-none tracking-[-2px] tabular-nums lg:text-[76px] ${
+                !oculto && r.livre_para_gastar < 0 ? 'text-debito-claro' : ''
+              }`}
+            >
               {oculto ? (
                 OCULTO
               ) : (
@@ -154,7 +159,7 @@ export default function Inicio() {
           ))}
           <div className="hidden items-center gap-3 border-t border-white/20 py-3 lg:flex">
             <span className="grow text-[15px] text-tinta-claro">Em conta agora</span>
-            <span className="text-[15px] font-bold tabular-nums">{m(r.saldo_em_conta)}</span>
+            <span className={`text-[15px] font-bold tabular-nums ${r.saldo_em_conta < 0 ? 'text-debito-claro' : ''}`}>{m(r.saldo_em_conta)}</span>
           </div>
         </div>
       </section>
@@ -164,7 +169,7 @@ export default function Inicio() {
           <Icon name="mais" size={18} strokeWidth={2} />
           Pagamento
         </Link>
-        <Link to="/lancamentos/novo?natureza=receita" className={`${botaoSecundario} flex-1 px-2 text-musgo`}>
+        <Link to="/lancamentos/novo?natureza=receita" className={`${botaoSecundario} flex-1 px-2 text-credito`}>
           <Icon name="mais" size={18} strokeWidth={2} />
           Recebimento
         </Link>
@@ -181,8 +186,8 @@ export default function Inicio() {
       <div className="grid gap-8 px-5 pt-5 lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:gap-10 lg:px-0 lg:pt-0">
         <div className="flex flex-col gap-8">
           <Secao titulo={`${maiuscula(MESES[hoje.getMonth()])} até agora`}>
-            <LinhaResumo rotulo="Entrou" sub="Recebimentos na conta" valor={m(r.entrou)} classe="text-musgo" />
-            <LinhaResumo rotulo="Gastou" sub={`Contas e faturas que fecham em ${MESES[hoje.getMonth()]}`} valor={m(r.saiu)} />
+            <LinhaResumo rotulo="Entrou" sub="Recebimentos na conta" valor={m(r.entrou)} classe="text-credito" />
+            <LinhaResumo rotulo="Gastou" sub={`Contas e faturas que fecham em ${MESES[hoje.getMonth()]}`} valor={m(r.saiu)} classe="text-debito" />
             <Detalhamento d={r.gastou_detalhe} m={m} />
             <LinhaResumo
               rotulo="Sai da conta"
@@ -192,9 +197,10 @@ export default function Inicio() {
                   : `Contas e faturas que vencem em ${MESES[hoje.getMonth()]}`
               }
               valor={m(r.sai_da_conta)}
+              classe="text-debito"
             />
             <p className="pt-3 text-[15px] text-suave lg:hidden">
-              Em conta agora: <strong className="text-tinta">{m(r.saldo_em_conta)}</strong>
+              Em conta agora: <strong className={r.saldo_em_conta < 0 ? 'text-debito' : 'text-tinta'}>{m(r.saldo_em_conta)}</strong>
             </p>
           </Secao>
 
@@ -210,18 +216,20 @@ export default function Inicio() {
             </p>
             {r.categorias.length === 0 && <p className="py-2.5 text-[15px] text-suave">Nenhuma despesa lançada este mês.</p>}
             {r.categorias.map((c) => (
-              <div key={c.nome} className="flex flex-col gap-1.5 border-b border-linha py-2.5">
+              <div key={c.id ?? c.nome} className="flex flex-col gap-1.5 border-b border-linha py-2.5">
                 <div className="flex justify-between text-[15px]">
-                  <span className="font-semibold">{c.nome}</span>
+                  <span className="font-semibold">
+                    <RotuloCategoria nome={c.nome} cor={c.cor} />
+                  </span>
                   <span className="font-bold tabular-nums">{m(c.valor)}</span>
                 </div>
-                <Barra largura={pct(c.valor, maiorCategoria)} altura="h-1.5" />
+                <Barra largura={pct(c.valor, maiorCategoria)} altura="h-2" corHex={c.cor} />
               </div>
             ))}
             {r.creditos_cartao > 0 && (
               <div className="flex justify-between border-b border-linha py-2.5 text-[15px]">
                 <span className="font-semibold">Créditos e estornos no cartão</span>
-                <span className="font-bold tabular-nums text-musgo">- {m(r.creditos_cartao)}</span>
+                <span className="font-bold tabular-nums text-credito">- {m(r.creditos_cartao)}</span>
               </div>
             )}
           </Secao>
@@ -253,7 +261,7 @@ export default function Inicio() {
               Faturas e contas que vencem em {proximoMes} somam <strong className="text-tinta">{m(r.compromisso_proximo_mes)}</strong>
               {r.entradas_proximo_mes > 0 ? (
                 <>
-                  , e estão previstos <strong className="text-musgo">{m(r.entradas_proximo_mes)}</strong> de recebimentos.
+                  , e estão previstos <strong className="text-credito">{m(r.entradas_proximo_mes)}</strong> de recebimentos.
                 </>
               ) : r.entrou > 0 ? (
                 `, cerca de ${pct(r.compromisso_proximo_mes, r.entrou)} do que entrou este mês.`
@@ -271,13 +279,14 @@ export default function Inicio() {
               titulo="Você deve"
               sub={emp.devo_quantidade ? `${emp.devo_quantidade} ${emp.devo_quantidade === 1 ? 'empréstimo' : 'empréstimos'}, ${m(emp.devo_por_mes)} por mês` : 'Nada em aberto'}
               valor={m(emp.devo_total)}
+              valorClasse={emp.devo_total ? 'text-debito' : ''}
             />
             <LinhaLink
               to="/emprestimos"
               titulo="Te devem"
               sub={emp.devem_pessoas.length ? emp.devem_pessoas.join(', ') : 'Ninguém te deve'}
               valor={m(emp.devem_total)}
-              valorClasse="text-musgo"
+              valorClasse="text-credito"
             />
           </Secao>
         </div>
@@ -306,9 +315,11 @@ export default function Inicio() {
                         {l.parcela_total ? `parcela ${l.parcela_atual} de ${l.parcela_total}` : l.tipo === 'recorrente' ? 'todo mês' : ''}
                       </span>
                     </td>
-                    <td className="border-b border-linha p-3">{cad.categoria(l)}</td>
+                    <td className="border-b border-linha p-3">
+                      <RotuloCategoria nome={cad.categoria(l)} cor={cad.cor(l.categoria)} />
+                    </td>
                     <td className="border-b border-linha p-3">{cad.meio(l)}</td>
-                    <td className={`border-b border-linha py-3 pl-3 text-right font-bold tabular-nums ${l.natureza === 'receita' ? 'text-musgo' : ''}`}>
+                    <td className={`border-b border-linha py-3 pl-3 text-right font-bold tabular-nums ${l.natureza === 'receita' ? 'text-credito' : 'text-debito'}`}>
                       {l.natureza === 'receita' ? `+ ${m(l.valor)}` : m(l.valor)}
                     </td>
                   </tr>

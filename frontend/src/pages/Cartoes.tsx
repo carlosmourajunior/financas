@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
+import { SeletorCategoria } from '../components/Categorias'
 import { FormCartao } from '../components/Formularios'
 import { ConferirDatas, TrazerDoBanco } from '../components/OpenFinance'
 import { useOpenFinance } from '../lib/openfinance'
@@ -32,7 +33,7 @@ export default function Cartoes() {
   const [novo, setNovo] = useState(false)
   const of = useOpenFinance()
   const [soSemCategoria, setSoSemCategoria] = useState(false)
-  const categorias = useCadastros().categorias.filter((x) => x.natureza === 'despesa')
+  const cad = useCadastros()
   const c = cartoes.find((x) => String(x.id) === sel) ?? cartoes[0]
   const detalhe = useApi<DetalheCartao>(c ? `/cartoes/${c.id}/detalhe/${fecha ? `?fecha=${fecha}` : ''}` : null)
   const setSel = (id: string) => setBusca({ cartao: id }, { replace: true })
@@ -218,11 +219,17 @@ export default function Cartoes() {
                       l.natureza === 'receita' ? (
                         'Crédito na fatura'
                       ) : (
-                        <EscolherCategoria compra={l} compras={d.compras} categorias={categorias} aoMudar={detalhe.recarregar} />
+                        <EscolherCategoria
+                          compra={l}
+                          compras={d.compras}
+                          categorias={cad.categorias}
+                          aoMudar={detalhe.recarregar}
+                          aoCriarCategoria={cad.recarregarCategorias}
+                        />
                       )
                     }
                     valor={l.natureza === 'receita' ? `- ${moeda(l.valor)}` : moeda(l.valor)}
-                    valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
+                    valorClasse={l.natureza === 'receita' ? 'text-credito' : 'text-debito'}
                     extra={l.parcela_total && <span className="text-sm text-suave">parcela {l.parcela_atual} de {l.parcela_total}</span>}
                   />
                 ))}
@@ -271,17 +278,18 @@ function EscolherCategoria({
   compras,
   categorias,
   aoMudar,
+  aoCriarCategoria,
 }: {
   compra: CompraNoCartao
   compras: CompraNoCartao[]
   categorias: Categoria[]
   aoMudar: () => void
+  aoCriarCategoria: () => void
 }) {
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
-  async function mudar(valor: string) {
-    const categoria = valor ? Number(valor) : null
+  async function mudar(categoria: number | null) {
     const iguais = compra.categoria_id
       ? [compra]
       : compras.filter((l) => l.natureza === 'despesa' && !l.categoria_id && l.descricao === compra.descricao)
@@ -299,22 +307,18 @@ function EscolherCategoria({
 
   return (
     <span className="flex flex-wrap items-center gap-2">
-      <select
-        aria-label={`Categoria de ${compra.descricao}`}
-        value={compra.categoria_id ?? ''}
+      <SeletorCategoria
+        rotulo={`Categoria de ${compra.descricao}`}
+        valor={compra.categoria_id}
+        natureza="despesa"
+        categorias={categorias}
         disabled={salvando}
-        onChange={(e) => mudar(e.target.value)}
+        aoEscolher={mudar}
+        aoCriar={aoCriarCategoria}
         className={`-mx-1 -my-1 min-h-8 cursor-pointer rounded-md bg-transparent px-1 py-1 text-sm hover:bg-nevoa disabled:opacity-60 ${
           compra.categoria_id ? 'text-suave' : 'font-semibold text-ambar-texto'
         }`}
-      >
-        <option value="">Sem categoria</option>
-        {categorias.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.nome}
-          </option>
-        ))}
-      </select>
+      />
       {erro && <span className="text-sm font-semibold text-ambar-texto">{erro}</span>}
     </span>
   )

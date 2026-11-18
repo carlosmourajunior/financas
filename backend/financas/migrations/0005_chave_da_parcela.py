@@ -15,7 +15,7 @@ def chavear_parcelas_importadas(apps, schema_editor):
     ordens = Counter()
     parcelas = Lancamento.objects.filter(importado=True, cartao__isnull=False, parcela_atual__isnull=False, parcela_total__isnull=False)
     # Sem os campos que o cartão ganhou depois desta migração (ainda não existem no banco aqui).
-    for l in parcelas.select_related("cartao").defer("cartao__ativo", "cartao__fechamentos").order_by("valor", "id"):
+    for l in parcelas.select_related("cartao").defer("cartao__ativo", "cartao__fechamentos", "cartao__vencimentos").order_by("valor", "id"):
         fecha = fechamento_de(l.cartao, l.data)
         base = chave_da_compra(fecha, l.descricao, l.parcela_atual, l.parcela_total, 0)
         ordens[(l.cartao_id, base, l.parcela_atual)] += 1

@@ -51,6 +51,8 @@ class Cartao(DoUsuario):
     # Dia em que cada fatura de fato fechou, quando o banco informa e foge do dia de costume:
     # {"2026-10": 25}. Os meses sem registro fecham no dia_fechamento.
     fechamentos = models.JSONField(default=dict, blank=True)
+    # Vencimento de cada fatura informado pelo banco, pelo mês em que ela fecha: {"2026-09": "2026-10-01"}.
+    vencimentos = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["-ativo", "nome"]

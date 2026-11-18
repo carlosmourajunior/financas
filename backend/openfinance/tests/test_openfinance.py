@@ -502,8 +502,10 @@ class FechamentoDeCadaFaturaTests(APITestCase):
                                        {"id": "b", "dueDate": "2026-10-01", "billClosingDate": "2026-09-24T00:00:00Z"}])
         cartao.refresh_from_db()
         self.assertEqual(cartao.fechamentos, {"2026-10": 25, "2026-09": 24})
+        self.assertEqual(cartao.vencimentos, {"2026-10": "2026-11-01", "2026-09": "2026-10-01"})
         outubro = fatura_que_fecha_em(cartao, date(2026, 10, 25))
         self.assertEqual((outubro.abre, outubro.fecha), (date(2026, 9, 25), date(2026, 10, 25)))
+        self.assertEqual(outubro.vence, date(2026, 11, 1))
         # A aberta começa no dia seguinte ao fechamento real e fecha no dia de costume.
         aberta = fatura_aberta(cartao, date(2026, 11, 18))
         self.assertEqual((aberta.abre, aberta.fecha), (date(2026, 10, 26), date(2026, 11, 23)))

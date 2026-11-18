@@ -185,20 +185,24 @@ def registrar_fechamentos(cartao: Cartao, fechadas: list[dict]) -> None:
     """
     salvos = dict(cartao.fechamentos or {})
     fechamentos = dict(salvos)
+    vencimentos = dict(cartao.vencimentos or {})
     for b in fechadas:
         d = _data_iso(b.get("billClosingDate"))
         if not d:
             continue
         chave = f"{d.year}-{d.month:02d}"
+        vence = _data_iso(b.get("dueDate"))
+        if vence and vence > d:
+            vencimentos[chave] = vence.isoformat()
         if fechamentos.get(chave) == d.day:
             continue
         antes = fecha_do_mes(cartao, d)
         fechamentos[chave] = d.day
         if antes != d and not PagamentoFatura.objects.filter(cartao=cartao, fecha=d).exists():
             PagamentoFatura.objects.filter(cartao=cartao, fecha=antes).update(fecha=d)
-    if fechamentos != salvos:
-        cartao.fechamentos = fechamentos
-        Cartao.objects.filter(pk=cartao.pk).update(fechamentos=fechamentos)
+    if fechamentos != salvos or vencimentos != (cartao.vencimentos or {}):
+        cartao.fechamentos, cartao.vencimentos = fechamentos, vencimentos
+        Cartao.objects.filter(pk=cartao.pk).update(fechamentos=fechamentos, vencimentos=vencimentos)
 
 
 def _desde_o_fechamento(fechadas: list[dict], abre: date) -> date:

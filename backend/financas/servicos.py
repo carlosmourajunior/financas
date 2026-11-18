@@ -147,6 +147,15 @@ class Fatura:
 
 
 def _vencimento(cartao: Cartao, fechamento: date) -> date:
+    # O vencimento que o banco informou para esta fatura vale mais que o dia de costume.
+    informado = (cartao.__dict__.get("vencimentos") or {}).get(f"{fechamento.year}-{fechamento.month:02d}")
+    if informado:
+        try:
+            d = date.fromisoformat(informado)
+            if d > fechamento:
+                return d
+        except ValueError:
+            pass
     # Se o vencimento é antes do fechamento no calendário, ele cai no mês seguinte.
     meses = 0 if cartao.dia_vencimento > cartao.dia_fechamento else 1
     return somar_meses(fechamento, meses, cartao.dia_vencimento)
@@ -348,6 +357,12 @@ def acertar_pagamentos_fora_do_fechamento(cartao: Cartao) -> int:
     Se o fechamento certo já tem pagamento, o antigo é repetido e sai. Devolve quantos mudou.
     """
     mudou = 0
+    # Pago no dia do fechamento ou antes não existe: veio de uma versão que confundia os dois dias.
+    for p in PagamentoFatura.objects.filter(cartao=cartao):
+        if p.data <= p.fecha:
+            p.data = _vencimento(cartao, fecha_do_mes(cartao, p.fecha))
+            p.save(update_fields=["data", "atualizado_em"])
+            mudou += 1
     pagos = list(PagamentoFatura.objects.filter(cartao=cartao))
     certos = {p.fecha for p in pagos if p.fecha == fecha_do_mes(cartao, p.fecha)}
     for p in pagos:

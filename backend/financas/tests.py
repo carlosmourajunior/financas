@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 
 from .models import Cartao, Conta, Emprestimo, Lancamento, PagamentoFatura, Recorrencia
 from .servicos import (
+    fatura_que_fecha_em,
     acertar_pagamentos_fora_do_fechamento,
     detalhe_cartao,
     fatura_aberta,
@@ -315,6 +316,22 @@ class VencidasTests(ApiBase):
         self.assertTrue(luz.pago and salario.pago)
         self.assertFalse(futuro.pago)
         self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000 + 50_000)
+
+    def test_vencimento_informado_pelo_banco_vale_para_a_fatura(self):
+        # Itaú: fecha no dia 25 e vence no dia 1 do mês seguinte.
+        self.cartao.dia_fechamento, self.cartao.dia_vencimento = 25, 1
+        self.cartao.vencimentos = {"2026-09": "2026-10-02"}
+        self.cartao.save()
+        self.assertEqual(fatura_que_fecha_em(self.cartao, date(2026, 9, 25)).vence, date(2026, 10, 2))
+        self.assertEqual(fatura_que_fecha_em(self.cartao, date(2026, 8, 25)).vence, date(2026, 9, 1))
+
+    def test_pagamento_no_dia_do_fechamento_vai_para_o_vencimento(self):
+        self.cartao.dia_fechamento, self.cartao.dia_vencimento = 25, 1
+        self.cartao.save()
+        p = PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 8, 25), valor=1, data=date(2026, 8, 25))
+        acertar_pagamentos_fora_do_fechamento(self.cartao)
+        p.refresh_from_db()
+        self.assertEqual(p.data, date(2026, 9, 1))
 
     def test_pagamento_em_dia_que_nao_fecha_mais_vai_para_o_fechamento_certo(self):
         # O Visa fecha dia 3. Um pagamento antigo gravado no dia 2 e outro no dia certo do mesmo mês: o antigo sai.

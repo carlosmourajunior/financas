@@ -157,7 +157,13 @@ def fatura_aberta(
     último fechamento informado pelo banco.
     """
     com_fatura = any((t.get("creditCardMetadata") or {}).get("billId") for t in transacoes)
-    soltas = [t for t in transacoes if (t.get("creditCardMetadata") or {}).get("billId") not in ids_fechadas]
+    # Estorno ou crédito ainda pendente: o banco não abateu da fatura, então ainda não entra.
+    soltas = [
+        t
+        for t in transacoes
+        if (t.get("creditCardMetadata") or {}).get("billId") not in ids_fechadas
+        and not (t.get("status") == "PENDING" and centavos(t.get("amount")) < 0)
+    ]
     escolhidas, parcelas = [], []
     for t in soltas:
         meta = t.get("creditCardMetadata") or {}

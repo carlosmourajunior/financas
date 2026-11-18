@@ -475,3 +475,13 @@ class TotalDoBancoTests(APITestCase):
         ]
         lida = conversao.fatura_aberta("MP", "", {"f"}, date(2026, 11, 6), date(2026, 12, 5), date(2026, 12, 10), transacoes)
         self.assertEqual(sorted((i.descricao, i.parcela_atual) for i in lida.itens), [("FEHEROSSH", 1), ("OUTRA LOJA", 2)])
+
+    def test_credito_pendente_nao_abate_a_fatura_aberta(self):
+        transacoes = [
+            {"id": "x", "description": "Antiga", "amount": 10, "date": "2026-11-01", "creditCardMetadata": {"billId": "f"}},
+            {"id": "a", "description": "Mercado", "amount": 100, "date": "2026-11-10", "status": "POSTED", "creditCardMetadata": {}},
+            {"id": "b", "description": "Reducao mensalidade", "amount": -52.5, "date": "2026-11-11", "status": "PENDING", "creditCardMetadata": {}},
+            {"id": "c", "description": "Estorno loja", "amount": -20, "date": "2026-11-12", "status": "POSTED", "creditCardMetadata": {}},
+        ]
+        lida = conversao.fatura_aberta("Itau", "", {"f"}, date(2026, 10, 24), date(2026, 11, 23), date(2026, 12, 1), transacoes)
+        self.assertEqual(sorted(i.valor for i in lida.itens), [-2_000, 10_000])

@@ -187,6 +187,15 @@ def _dia(d: date | None) -> int | None:
     return min(d.day, 28) if d else None
 
 
+def _datas_certas(c: pluggy.ContaPluggy) -> bool:
+    """O fechamento só é confiável se veio de uma fatura fechada; o do cartão já veio errado."""
+    try:
+        ultima = next(iter(pluggy.faturas(c.id)), None)
+    except pluggy.ErroPluggy:
+        return False
+    return bool((ultima or {}).get("billClosingDate"))
+
+
 def _datas_do_cartao(c: pluggy.ContaPluggy) -> tuple[int | None, int | None]:
     """Fechamento e vencimento: da última fatura fechada e, sem ela, do cartão.
 
@@ -268,7 +277,7 @@ def trazer_contas(dono) -> dict:
             criadas["contas"].append(nome)
         elif c.tipo == "CREDIT":
             fecha, vence = _datas_do_cartao(c)
-            conferir = not (fecha and vence)
+            conferir = not (fecha and vence and _datas_certas(c))
             # Sem a data, o cartão precisa de algum dia para existir; o aviso pede para conferir.
             vence = vence or 10
             fecha = fecha or (vence - 7 if vence > 7 else vence + 21)

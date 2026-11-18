@@ -110,6 +110,32 @@ def _compra(t: dict) -> tuple:
     return (normalizar(descricao), meta.get("totalInstallments"), (meta.get("purchaseDate") or "")[:10] or centavos(t.get("amount")))
 
 
+def _mesma_compra(a: dict, b: dict) -> bool:
+    """Duas parcelas da mesma compra, mesmo com a descrição ou os centavos um pouco diferentes."""
+    ma, mb = a["creditCardMetadata"], b["creditCardMetadata"]
+    # A mesma parcela duas vezes são duas compras iguais (duas unidades do mesmo produto, por exemplo).
+    if ma.get("installmentNumber") == mb.get("installmentNumber") or ma.get("totalInstallments") != mb.get("totalInstallments"):
+        return False
+    if _compra(a) == _compra(b):
+        return True
+    va, vb = abs(centavos(a.get("amount"))), abs(centavos(b.get("amount")))
+    if abs(va - vb) > max(100, max(va, vb) // 50):
+        return False
+    da, db = (normalizar(_PARCELA_NO_FIM.sub("", t.get("description") or t.get("descriptionRaw") or "")).replace(" ", "") for t in (a, b))
+    curta = min(len(da), len(db), 10)
+    return curta >= 4 and da[:curta] == db[:curta]
+
+
+def _proxima_de_cada_compra(parcelas: list[dict]) -> list[dict]:
+    """Só a menor parcela ainda sem fatura de cada compra: se a k já está na aberta, a k+1 é da próxima,
+    mesmo que o banco a date no dia do fechamento."""
+    escolhidas: list[dict] = []
+    for t in sorted(parcelas, key=lambda t: t["creditCardMetadata"]["installmentNumber"]):
+        if not any(_mesma_compra(t, e) for e in escolhidas):
+            escolhidas.append(t)
+    return escolhidas
+
+
 def _encargo_da_ultima(nome: str, final: str, fechadas: list[dict], transacoes: list[dict]) -> int:
     """Juros, IOF e saldo anterior que entraram na última fatura fechada sem virar transação."""
     com_data = [b for b in fechadas if b.get("dueDate")]
@@ -132,19 +158,17 @@ def fatura_aberta(
     """
     com_fatura = any((t.get("creditCardMetadata") or {}).get("billId") for t in transacoes)
     soltas = [t for t in transacoes if (t.get("creditCardMetadata") or {}).get("billId") not in ids_fechadas]
-    escolhidas, proxima_parcela = [], {}
+    escolhidas, parcelas = [], []
     for t in soltas:
         meta = t.get("creditCardMetadata") or {}
         atual, total = meta.get("installmentNumber"), meta.get("totalInstallments")
         if com_fatura and atual and total and total > 1:
-            chave = _compra(t)
-            if chave not in proxima_parcela or atual < proxima_parcela[chave]["creditCardMetadata"]["installmentNumber"]:
-                proxima_parcela[chave] = t
+            parcelas.append(t)
         elif com_fatura or desde <= _data(t) <= fecha:
             # Com o id da fatura no conector, o que não está numa fatura fechada é da aberta, seja qual
             # for a data (compra lançada antes do início do ciclo no app, estorno pequeno).
             escolhidas.append(t)
-    escolhidas += proxima_parcela.values()
+    escolhidas += _proxima_de_cada_compra(parcelas)
     itens = [i for i in map(item_da_fatura, escolhidas) if i]
     encargo = _encargo_da_ultima(nome, final, fechadas or [], transacoes)
     if encargo > 0:

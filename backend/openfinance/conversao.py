@@ -80,6 +80,20 @@ def fatura_fechada(nome: str, final: str, conta_faturas: list[dict], fatura: dic
         escolhidas = [t for t in transacoes if abre <= _data(t) <= fecha]
     itens = [i for i in map(item_da_fatura, escolhidas) if i]
     total = fatura.get("totalAmount")
+    if total is not None and escolhidas:
+        # Juros, IOF e saldo da fatura anterior entram no total do banco sem virar transação.
+        # A diferença entra como uma linha, para a fatura no app ser o que de fato se paga.
+        diferenca = centavos(total) - sum(i.valor for i in itens)
+        if diferenca:
+            fecha = date.fromisoformat((fatura.get("billClosingDate") or fatura["dueDate"])[:10])
+            itens.append(
+                Item(
+                    data=fecha,
+                    descricao="Juros, IOF e saldo anterior (diferença para o total do banco)" if diferenca > 0 else "Crédito da fatura (diferença para o total do banco)",
+                    valor=diferenca,
+                    tipo=Tipo.ENCARGO if diferenca > 0 else Tipo.CREDITO,
+                )
+            )
     return FaturaLida(
         banco=nome,
         itens=sorted(itens, key=lambda i: i.data),

@@ -24,6 +24,8 @@ from . import conversao, pluggy
 from .models import Vinculo
 
 ABERTA = "aberta"
+# Parcelas de compras antigas chegam com a data da compra, que pode ser de mais de um ano antes.
+JANELA_PARCELAS = 400
 
 
 class CartaoDatasSerializer(serializers.ModelSerializer):
@@ -125,7 +127,7 @@ class PreviaFaturaView(APIView):
             ciclo = fatura_aberta(cartao, date.today())
             desde = _desde_o_fechamento(fechadas, ciclo.abre)
             # Até um ano à frente: as parcelas futuras vêm com a data projetada do mês delas.
-            transacoes = _chamar(pluggy.transacoes, conta.id, desde - timedelta(days=45), ciclo.fecha + timedelta(days=366))
+            transacoes = _chamar(pluggy.transacoes, conta.id, desde - timedelta(days=JANELA_PARCELAS), ciclo.fecha + timedelta(days=366))
             ids = {b["id"] for b in fechadas}
             lida = conversao.fatura_aberta(conta.nome, final, ids, desde, ciclo.fecha, ciclo.vence, transacoes)
         else:
@@ -133,7 +135,8 @@ class PreviaFaturaView(APIView):
             if not fatura:
                 raise ValidationError({"fatura": "Essa fatura não está mais na Pluggy."})
             fecha = date.fromisoformat((fatura.get("billClosingDate") or fatura["dueDate"])[:10])
-            transacoes = _chamar(pluggy.transacoes, conta.id, fecha - timedelta(days=45), fecha + timedelta(days=2))
+            # Parcelas de compras antigas vêm com a data da compra: até 13 meses antes do fechamento.
+            transacoes = _chamar(pluggy.transacoes, conta.id, fecha - timedelta(days=JANELA_PARCELAS), fecha + timedelta(days=2))
             lida = conversao.fatura_fechada(conta.nome, final, fechadas, fatura, transacoes)
 
         if not lida.itens:
@@ -348,7 +351,7 @@ def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
         no_periodo = [b for b in fechadas if b.get("dueDate") and date.fromisoformat(b["dueDate"][:10]) >= desde]
         aberta = fatura_aberta(cartao, hoje)
         inicio_aberta = _desde_o_fechamento(fechadas, aberta.abre)
-        transacoes = _chamar(pluggy.transacoes, c.id, min(desde, inicio_aberta) - timedelta(days=45), aberta.fecha + timedelta(days=366))
+        transacoes = _chamar(pluggy.transacoes, c.id, min(desde, inicio_aberta) - timedelta(days=JANELA_PARCELAS), aberta.fecha + timedelta(days=366))
         final = pluggy.final_do_cartao(c.numero)
         lidas = [conversao.fatura_fechada(cartao.nome, final, fechadas, b, transacoes) for b in no_periodo]
         # O que ainda não está em fatura fechada vai todo para a aberta (com a próxima parcela de cada

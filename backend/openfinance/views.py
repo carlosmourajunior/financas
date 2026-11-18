@@ -4,6 +4,7 @@ A gravação continua nas rotas de importação (/api/importar/.../confirmar/): 
 pela mesma revisão e pela mesma regra de repetidos.
 """
 
+import re
 from datetime import date, timedelta
 
 from django.db import transaction
@@ -22,6 +23,13 @@ from . import conversao, pluggy
 from .models import Vinculo
 
 ABERTA = "aberta"
+
+
+class CartaoDatasSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cartao
+        fields = ["id", "dia_fechamento", "dia_vencimento"]
+        read_only_fields = ["id"]
 # O extrato de uma vez cobre no máximo este período, para a busca não ficar lenta.
 MAXIMO_DIAS = 180
 
@@ -58,6 +66,7 @@ class EstadoView(APIView):
             return Response({"ativo": False, "contas": []})
         vinculos = {v.pluggy_conta: v for v in Vinculo.objects.filter(dono=request.user)}
         contas = _chamar(pluggy.contas)
+        nomes = pluggy.nomes(contas)
         return Response(
             {
                 "ativo": True,
@@ -65,12 +74,13 @@ class EstadoView(APIView):
                     {
                         "id": c.id,
                         "tipo": c.tipo,
-                        "nome": pluggy.nome_com_banco(c, c.nome),
+                        "nome": nomes[c.id],
                         "banco": c.banco,
                         "numero": c.numero,
                         "saldo": c.saldo,
                         "conta": getattr(vinculos.get(c.id), "conta_id", None),
                         "cartao": getattr(vinculos.get(c.id), "cartao_id", None),
+                        "conferir_datas": getattr(vinculos.get(c.id), "conferir_datas", False),
                     }
                     for c in contas
                 ],
@@ -158,45 +168,115 @@ class PreviaExtratoView(APIView):
         return Response(previa_extrato(local, lido))
 
 
-def _dia(d: date | None, padrao: int) -> int:
+def _dia(d: date | None) -> int | None:
     # O app guarda dias de 1 a 28 (fevereiro); dia 29 a 31 vira 28.
-    return min(d.day, 28) if d else padrao
+    return min(d.day, 28) if d else None
+
+
+def _datas_do_cartao(c: pluggy.ContaPluggy) -> tuple[int | None, int | None]:
+    """Fechamento e vencimento: do cartão ou, se o banco não informa ali, da última fatura."""
+    fecha, vence = _dia(c.fechamento), _dia(c.vencimento)
+    if fecha and vence:
+        return fecha, vence
+    try:
+        ultima = next(iter(pluggy.faturas(c.id)), None)
+    except pluggy.ErroPluggy:
+        ultima = None
+    if ultima:
+        fecha = fecha or _dia(_data_iso(ultima.get("billClosingDate")))
+        vence = vence or _dia(_data_iso(ultima.get("dueDate")))
+    return fecha, vence
+
+
+def _data_iso(texto: str | None) -> date | None:
+    return date.fromisoformat(texto[:10]) if texto else None
+
+
+def _nome_da_versao_anterior(c: pluggy.ContaPluggy) -> str:
+    """Como a primeira versão nomeava, para reconhecer (e melhorar) o que ela criou sem guardar o nome."""
+    nome = c.nome.strip()
+    if c.banco and (not nome or re.search(r"\b(s\.?\s?a\.?|ltda|instituic[aã]o de pagamento|banco m[uú]ltiplo|cooperativa)\b", nome, re.I)):
+        return f"{c.banco} Poupança" if c.subtipo == "SAVINGS_ACCOUNT" else c.banco
+    nome = nome or ("Cartão" if c.tipo == "CREDIT" else "Conta")
+    if nome.islower():
+        nome = nome.title()
+    if c.banco and c.banco.lower() not in nome.lower():
+        nome = f"{c.banco} {nome}"
+    return nome[: 40 if c.tipo == "CREDIT" else 80]
 
 
 @transaction.atomic
 def trazer_contas(dono) -> dict:
-    """Cria no app as contas e cartões da Pluggy que ainda não têm par. Pode rodar quantas vezes quiser."""
+    """Cria no app as contas e cartões da Pluggy que ainda não têm par. Pode rodar quantas vezes quiser.
+
+    O que já foi trazido e o usuário não renomeou ganha o nome atual (o jeito de nomear melhora).
+    """
     # Trava o usuário: duas chamadas juntas (a tela abre duas vezes) não criam conta em dobro.
     type(dono).objects.select_for_update().filter(pk=dono.pk).first()
     ligadas = {v.pluggy_conta: v for v in Vinculo.objects.filter(dono=dono).select_related("conta", "cartao")}
-    criadas = {"contas": [], "cartoes": []}
-    for c in _chamar(pluggy.contas):
+    criadas = {"contas": [], "cartoes": [], "renomeadas": [], "conferir_datas": []}
+    todas = _chamar(pluggy.contas)
+    nomes = pluggy.nomes(todas)
+    for c in todas:
+        nome = nomes[c.id]
         if c.id in ligadas:
-            # Trazida antes com o nome cru do banco ("platinum") e não renomeada: ganha o nome com o banco.
-            alvo = ligadas[c.id].conta or ligadas[c.id].cartao
-            limite = 80 if ligadas[c.id].conta else 40
-            novo = pluggy.nome_com_banco(c, alvo.nome)[:limite]
-            if alvo.nome == c.nome.strip()[:limite] and novo != alvo.nome:
-                alvo.nome = novo
+            v = ligadas[c.id]
+            alvo = v.conta or v.cartao
+            dados = {v.nome_dado} if v.nome_dado else {c.nome.strip(), _nome_da_versao_anterior(c)}
+            if alvo.nome in dados and alvo.nome != nome:
+                criadas["renomeadas"].append(f"{alvo.nome} → {nome}")
+                alvo.nome = nome
                 alvo.save(update_fields=["nome", "atualizado_em"])
+            if v.cartao and not v.nome_dado:
+                # Trazido por uma versão que inventava dia 3 e 10 quando o banco não informava.
+                fecha, vence = _datas_do_cartao(c)
+                if fecha and vence:
+                    v.cartao.dia_fechamento, v.cartao.dia_vencimento = fecha, vence
+                    v.cartao.save(update_fields=["dia_fechamento", "dia_vencimento", "atualizado_em"])
+                else:
+                    v.conferir_datas = True
+                    v.save(update_fields=["conferir_datas", "atualizado_em"])
+                    criadas["conferir_datas"].append(str(v.cartao))
+            if v.cartao and not v.cartao.final and (final := pluggy.final_do_cartao(c.numero)):
+                v.cartao.final = final
+                v.cartao.save(update_fields=["final", "atualizado_em"])
+            if v.nome_dado != alvo.nome:
+                v.nome_dado = alvo.nome
+                v.save(update_fields=["nome_dado", "atualizado_em"])
             continue
         if c.tipo == "BANK":
             tipo = Conta.Tipo.POUPANCA if c.subtipo == "SAVINGS_ACCOUNT" else Conta.Tipo.CORRENTE
             # Como no cadastro à mão: o saldo de hoje é o ponto de partida.
-            conta = Conta.objects.create(dono=dono, nome=pluggy.nome_com_banco(c, "Conta")[:80], tipo=tipo, saldo_inicial=c.saldo)
-            Vinculo.objects.create(dono=dono, conta=conta, pluggy_conta=c.id)
-            criadas["contas"].append(conta.nome)
+            conta = Conta.objects.create(dono=dono, nome=nome, tipo=tipo, saldo_inicial=c.saldo)
+            Vinculo.objects.create(dono=dono, conta=conta, pluggy_conta=c.id, nome_dado=nome)
+            criadas["contas"].append(nome)
         elif c.tipo == "CREDIT":
-            vence = _dia(c.vencimento, 10)
-            # Sem a data do banco, fecha uma semana antes de vencer.
-            fecha = _dia(c.fechamento, vence - 7 if vence > 7 else vence + 21)
-            final = c.numero[-4:] if c.numero[-4:].isdigit() else ""
+            fecha, vence = _datas_do_cartao(c)
+            conferir = not (fecha and vence)
+            # Sem a data, o cartão precisa de algum dia para existir; o aviso pede para conferir.
+            vence = vence or 10
+            fecha = fecha or (vence - 7 if vence > 7 else vence + 21)
             cartao = Cartao.objects.create(
-                dono=dono, nome=pluggy.nome_com_banco(c, "Cartão")[:40], final=final, limite=max(c.limite, 0), dia_fechamento=fecha, dia_vencimento=vence
+                dono=dono, nome=nome, final=pluggy.final_do_cartao(c.numero), limite=max(c.limite, 0), dia_fechamento=fecha, dia_vencimento=vence
             )
-            Vinculo.objects.create(dono=dono, cartao=cartao, pluggy_conta=c.id)
+            Vinculo.objects.create(dono=dono, cartao=cartao, pluggy_conta=c.id, nome_dado=nome, conferir_datas=conferir)
             criadas["cartoes"].append(str(cartao))
+            if conferir:
+                criadas["conferir_datas"].append(str(cartao))
     return criadas
+
+
+class DatasConferidasView(APIView):
+    """O usuário acertou o fechamento e o vencimento de um cartão trazido do banco."""
+
+    def post(self, request):
+        _exigir_liberado(request)
+        cartao = cartao_do_usuario(request, request.data.get("cartao"))
+        s = CartaoDatasSerializer(cartao, data=request.data)
+        s.is_valid(raise_exception=True)
+        s.save()
+        Vinculo.objects.filter(cartao=cartao).update(conferir_datas=False)
+        return Response(s.data)
 
 
 class TrazerContasView(APIView):

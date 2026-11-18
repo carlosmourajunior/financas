@@ -209,7 +209,10 @@ export function TrazerDoBanco({ automatico = false, aoTrazer }: { automatico?: b
     try {
       const r = await api<ContasTrazidas>('/openfinance/trazer-contas/', { method: 'POST' })
       const nomes = [...r.contas, ...r.cartoes]
-      setAviso(nomes.length ? `Trouxemos do banco: ${nomes.join(', ')}.` : 'Tudo o que está conectado no banco já está aqui.')
+      const partes = [nomes.length ? `Trouxemos do banco: ${nomes.join(', ')}.` : 'Tudo o que está conectado no banco já está aqui.']
+      if (r.renomeadas.length) partes.push(`Nomes acertados: ${r.renomeadas.join(', ')}.`)
+      if (r.conferir_datas.length) partes.push(`Confira o fechamento e o vencimento de: ${r.conferir_datas.join(', ')}. O banco não informou.`)
+      setAviso(partes.join(' '))
       aoTrazer(r)
     } catch (err) {
       setErro((err as Error).message || 'Não foi possível trazer as contas do banco.')
@@ -235,6 +238,61 @@ export function TrazerDoBanco({ automatico = false, aoTrazer }: { automatico?: b
       </button>
       {aviso && <p className="text-[15px] font-semibold text-musgo">{aviso}</p>}
       {erro && <Erro>{erro}</Erro>}
+    </div>
+  )
+}
+
+const DIAS_DO_MES = Array.from({ length: 28 }, (_, i) => i + 1)
+
+/** O banco não informou fechamento e vencimento: pede os dias no lugar de inventar. */
+export function ConferirDatas({ cartao, aoSalvar }: { cartao: { id: number; dia_fechamento: number; dia_vencimento: number }; aoSalvar: () => void }) {
+  const [fecha, setFecha] = useState(cartao.dia_fechamento)
+  const [vence, setVence] = useState(cartao.dia_vencimento)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  async function salvar() {
+    setErro(null)
+    setSalvando(true)
+    try {
+      await api('/openfinance/datas-conferidas/', { method: 'POST', body: { cartao: cartao.id, dia_fechamento: fecha, dia_vencimento: vence } })
+      aoSalvar()
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível salvar.')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-l-4 border-ambar bg-white py-3 pl-4 pr-3">
+      <p className="text-[15px] font-semibold leading-snug text-ambar-texto">
+        O banco não informou o fechamento e o vencimento deste cartão. Confira na fatura e acerte os dias.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Campo label="Fecha no dia">
+          <select value={fecha} onChange={(e) => setFecha(Number(e.target.value))} className={campo}>
+            {DIAS_DO_MES.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        <Campo label="Vence no dia">
+          <select value={vence} onChange={(e) => setVence(Number(e.target.value))} className={campo}>
+            {DIAS_DO_MES.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </Campo>
+      </div>
+      {erro && <Erro>{erro}</Erro>}
+      <button onClick={salvar} disabled={salvando} className={`${botaoSecundario} disabled:opacity-60`}>
+        {salvando ? 'Salvando…' : 'Salvar os dias'}
+      </button>
     </div>
   )
 }

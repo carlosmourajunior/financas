@@ -2,12 +2,12 @@ from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from financas import views as fin
 from importacao import views as imp
 from openfinance import views as of
-from usuarios.views import CadastroView, EuView
+from usuarios.views import CadastroView, EuView, LoginView
 
 router = DefaultRouter()
 router.register("contas", fin.ContaViewSet, basename="conta")
@@ -23,7 +23,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/saude/", lambda r: JsonResponse({"ok": True})),
     path("api/auth/cadastro/", CadastroView.as_view()),
-    path("api/auth/token/", TokenObtainPairView.as_view()),
+    path("api/auth/token/", LoginView.as_view()),
     path("api/auth/token/renovar/", TokenRefreshView.as_view()),
     path("api/auth/eu/", EuView.as_view()),
     path("api/resumo/", fin.ResumoView.as_view()),

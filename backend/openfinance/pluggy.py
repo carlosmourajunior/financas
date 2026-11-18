@@ -37,7 +37,9 @@ def liberado_para(usuario) -> bool:
     """O módulo está ligado e este usuário é o dono das contas conectadas."""
     if not ativo() or not getattr(usuario, "is_authenticated", False):
         return False
-    return usuario.email.lower() in settings.PLUGGY_USUARIOS
+    # Igualdade exata: o cadastro já grava o e-mail em minúsculas. Comparar com .lower() deixava
+    # passar uma conta "DONO@..." diferente da do dono.
+    return usuario.email in settings.PLUGGY_USUARIOS
 
 
 def _requisicao(metodo: str, caminho: str, corpo: dict | None = None, chave: str | None = None) -> dict:

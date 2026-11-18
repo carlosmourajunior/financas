@@ -77,7 +77,8 @@ function situacao(l: Linha, hoje: string) {
 function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categoria[], aoCriarCategoria: () => void) {
   const f = l.fatura
   if (f) {
-    if (f.pagamento) return <BotaoPagar discreto rotulo="Desfazer pagamento" acao={() => desfazerPagamentoFatura(f.pagamento!.id)} aoMudar={aoMudar} />
+    // O que venceu antes de hoje conta como pago: não tem o que desfazer.
+    if (f.pagamento) return f.vence < hoje ? null : <BotaoPagar discreto rotulo="Desfazer pagamento" acao={() => desfazerPagamentoFatura(f.pagamento!.id)} aoMudar={aoMudar} />
     // Fatura que ainda não fechou pode receber compras: o pagamento fica para depois do fechamento.
     if (f.fecha >= hoje || f.total <= 0) return null
     return <BotaoPagar rotulo="Marcar como paga" acao={() => pagarFatura(f.cartao, f.fecha)} aoMudar={aoMudar} />
@@ -85,7 +86,7 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categor
   if (!l.lancamento) return null
   const id = l.lancamento
   const pagar = l.pago ? (
-    <BotaoPagar discreto rotulo="Desfazer" acao={() => marcarLancamento(id, false)} aoMudar={aoMudar} />
+    l.data < hoje ? null : <BotaoPagar discreto rotulo="Desfazer" acao={() => marcarLancamento(id, false)} aoMudar={aoMudar} />
   ) : (
     <BotaoPagar
       rotulo={l.natureza === 'receita' ? 'Marcar como recebido' : 'Marcar como pago'}

@@ -17,7 +17,7 @@ from .serializers import (
     PagamentoFaturaSerializer,
     RecorrenciaSerializer,
 )
-from .servicos import detalhe_cartao, detalhe_conta, faturas_do_mes, fim_do_mes, gerar_ocorrencias, repetir_lancamento, resumo, visao_geral
+from .servicos import detalhe_cartao, detalhe_conta, faturas_do_mes, fim_do_mes, gerar_ocorrencias, quitar_passados, repetir_lancamento, resumo, visao_geral
 
 
 def ler_mes(valor: str | None) -> date | None:
@@ -143,6 +143,7 @@ class LancamentoViewSet(DoUsuarioViewSet):
         mes = ler_mes(p.get("mes"))
         if mes:
             gerar_ocorrencias(self.request.user, fim_do_mes(mes))
+            quitar_passados(self.request.user, date.today())
             qs = qs.filter(data__gte=mes, data__lte=fim_do_mes(mes))
         for campo in ("natureza", "tipo", "cartao", "conta", "categoria"):
             if p.get(campo):

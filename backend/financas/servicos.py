@@ -204,6 +204,7 @@ def limite_usado(cartao: Cartao, hoje: date) -> int:
 
 def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | None = None) -> dict:
     """Uma fatura do cartão (a atual, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
+    quitar_passados(cartao.dono, hoje)
     aberta = fatura_aberta(cartao, hoje)
     # Assinaturas no cartão entram também nas próximas faturas e na que foi pedida.
     ate = fecha_do_mes(cartao, aberta.fecha, meses)
@@ -280,6 +281,7 @@ def pagamentos_por_fecha(cartao: Cartao) -> dict[date, PagamentoFatura]:
 
 def faturas_do_mes(dono, mes: date, hoje: date) -> list[dict]:
     """Uma linha por fatura que vence no mês, para a lista de lançamentos."""
+    quitar_passados(dono, hoje)
     inicio, fim = inicio_do_mes(mes), fim_do_mes(mes)
     linhas = []
     for c in Cartao.objects.filter(dono=dono, ativo=True):
@@ -340,6 +342,39 @@ def quitar_faturas_vencidas(cartao: Cartao, hoje: date) -> int:
         fecha = fecha_do_mes(cartao, fecha, 1)
 
 
+def acertar_pagamentos_fora_do_fechamento(cartao: Cartao) -> int:
+    """Pagamento gravado num dia que não é mais o fechamento do mês (o dia mudou depois) vai para o fechamento certo.
+
+    Se o fechamento certo já tem pagamento, o antigo é repetido e sai. Devolve quantos mudou.
+    """
+    mudou = 0
+    pagos = list(PagamentoFatura.objects.filter(cartao=cartao))
+    certos = {p.fecha for p in pagos if p.fecha == fecha_do_mes(cartao, p.fecha)}
+    for p in pagos:
+        certo = fecha_do_mes(cartao, p.fecha)
+        if p.fecha == certo:
+            continue
+        if certo in certos:
+            p.delete()
+        else:
+            p.fecha = certo
+            p.save(update_fields=["fecha", "atualizado_em"])
+            certos.add(certo)
+        mudou += 1
+    return mudou
+
+
+def quitar_passados(dono, hoje: date) -> None:
+    """O que tem data antes de hoje conta como pago ou recebido: lançamentos e faturas que já venceram.
+
+    De hoje em diante fica pendente até ser marcado.
+    """
+    Lancamento.objects.filter(dono=dono, pago=False, data__lt=hoje).update(pago=True)
+    for c in Cartao.objects.filter(dono=dono, ativo=True):
+        acertar_pagamentos_fora_do_fechamento(c)
+        quitar_faturas_vencidas(c, hoje)
+
+
 def pendencias(dono, hoje: date, cartoes: list[Cartao], dias: int = 180) -> list[dict]:
     """Contas (despesas em conta e faturas) que vencem até hoje e não foram pagas."""
     itens = [
@@ -369,6 +404,7 @@ def _soma(qs) -> int:
 def resumo(dono, hoje: date) -> dict:
     inicio, fim = inicio_do_mes(hoje), fim_do_mes(hoje)
     gerar_ocorrencias(dono, fim)
+    quitar_passados(dono, hoje)
     lanc = Lancamento.objects.filter(dono=dono)
 
     # Saldo em conta: o que já aconteceu nas contas até hoje.
@@ -562,6 +598,7 @@ def _tem_pluggy(objeto) -> bool:
 
 def detalhe_conta(conta: Conta, hoje: date, mes: date | None = None) -> dict:
     """Saldo da conta, os números do mês (o atual ou `mes`) e os lançamentos dele."""
+    quitar_passados(conta.dono, hoje)
     mes = inicio_do_mes(mes or hoje)
     fim = fim_do_mes(mes)
     gerar_ocorrencias(conta.dono, fim)
@@ -582,6 +619,7 @@ def visao_geral(dono, hoje: date, mes: date | None = None, sem_poupanca: bool = 
 
     `sem_poupanca` deixa as poupanças de fora da lista, dos totais e dos lançamentos.
     """
+    quitar_passados(dono, hoje)
     mes = inicio_do_mes(mes or hoje)
     fim = fim_do_mes(mes)
     gerar_ocorrencias(dono, fim)

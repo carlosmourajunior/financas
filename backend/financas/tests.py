@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 
 from .models import Cartao, Conta, Emprestimo, Lancamento, PagamentoFatura, Recorrencia
 from .servicos import (
+    acertar_pagamentos_fora_do_fechamento,
     detalhe_cartao,
     fatura_aberta,
     fim_do_mes,
@@ -160,12 +161,15 @@ class PagamentoDeFaturaTests(ApiBase):
         Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Antiga", valor=5_000, natureza="despesa", data=date(2026, 9, 1))
         Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Nova", valor=7_000, natureza="despesa", data=date(2026, 10, 20))
 
-    def test_fatura_vencida_sem_pagamento_fica_vencida(self):
+    def test_fatura_que_venceu_antes_de_hoje_conta_como_paga(self):
+        # No dia do vencimento ainda está pendente.
+        r = resumo(self.usuario, date(2026, 9, 10))
+        self.assertEqual([(v["tipo"], v["valor"]) for v in r["vencem_hoje"]], [("fatura", 5_000)])
+        # No dia seguinte conta como paga no vencimento: sai do saldo e não fica vencida.
         r = resumo(self.usuario, date(2026, 10, 27))
-        self.assertEqual(r["saldo_em_conta"], 100_000)
-        self.assertEqual([(v["tipo"], v["valor"], v["data"]) for v in r["vencidas"]], [("fatura", 5_000, date(2026, 9, 10))])
-        # Vencida de mês anterior também entra no que ainda vai sair.
-        self.assertEqual(r["a_vencer"], 5_000)
+        self.assertEqual(r["saldo_em_conta"], 100_000 - 5_000)
+        self.assertEqual(r["vencidas"], [])
+        self.assertEqual(PagamentoFatura.objects.get(cartao=self.cartao).data, date(2026, 9, 10))
 
     def test_pagar_fatura_tira_do_saldo_e_das_vencidas(self):
         r = self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json")
@@ -181,7 +185,8 @@ class PagamentoDeFaturaTests(ApiBase):
     def test_desfazer_pagamento(self):
         pid = self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json").data["id"]
         self.assertEqual(self.client.delete(f"/api/pagamentos-fatura/{pid}/").status_code, 204)
-        self.assertEqual(len(resumo(self.usuario, date(2026, 10, 27))["vencidas"]), 1)
+        # No dia do vencimento, desfeito, volta a vencer hoje.
+        self.assertEqual(len(resumo(self.usuario, date(2026, 9, 10))["vencem_hoje"]), 1)
 
     def test_nao_paga_fatura_de_cartao_alheio(self):
         outro = criar_usuario("b@exemplo.com")
@@ -288,14 +293,37 @@ class VencidasTests(ApiBase):
         r = resumo(self.usuario, date(2026, 10, 27))
         self.assertEqual([v["id"] for v in r["vencem_hoje"]], [luz.id])
         self.assertEqual(r["vencidas"], [])
-        r = resumo(self.usuario, date(2026, 10, 28))
-        self.assertEqual([v["nome"] for v in r["vencidas"]], ["Luz"])
-
-        # Marcar como pago pela API tira das vencidas e do saldo.
+        # Marcar como pago pela API tira de hoje e entra no saldo.
         self.assertEqual(self.client.patch(f"/api/lancamentos/{luz.id}/", {"pago": True}, format="json").status_code, 200)
+        r = resumo(self.usuario, date(2026, 10, 27))
+        self.assertEqual(r["vencem_hoje"], [])
+        self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000)
+
+    def test_lancamento_antes_de_hoje_conta_como_pago(self):
+        luz = Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Luz", valor=9_000, natureza="despesa", data=date(2026, 10, 27), pago=False
+        )
+        salario = Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Salário", valor=50_000, natureza="receita", data=date(2026, 10, 27), pago=False
+        )
+        futuro = Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Aluguel", valor=1_000, natureza="despesa", data=date(2026, 10, 28), pago=False
+        )
         r = resumo(self.usuario, date(2026, 10, 28))
         self.assertEqual(r["vencidas"], [])
-        self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000)
+        luz.refresh_from_db(); salario.refresh_from_db(); futuro.refresh_from_db()
+        self.assertTrue(luz.pago and salario.pago)
+        self.assertFalse(futuro.pago)
+        self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000 + 50_000)
+
+    def test_pagamento_em_dia_que_nao_fecha_mais_vai_para_o_fechamento_certo(self):
+        # O Visa fecha dia 3. Um pagamento antigo gravado no dia 2 e outro no dia certo do mesmo mês: o antigo sai.
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 9, 2), valor=1, data=date(2026, 9, 10))
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 9, 3), valor=1, data=date(2026, 9, 10))
+        # Sozinho no mês, o gravado no dia errado só muda de dia.
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 8, 5), valor=1, data=date(2026, 8, 10))
+        acertar_pagamentos_fora_do_fechamento(self.cartao)
+        self.assertEqual(sorted(PagamentoFatura.objects.filter(cartao=self.cartao).values_list("fecha", flat=True)), [date(2026, 8, 3), date(2026, 9, 3)])
 
     def test_receita_nao_e_conta_vencida(self):
         Lancamento.objects.create(

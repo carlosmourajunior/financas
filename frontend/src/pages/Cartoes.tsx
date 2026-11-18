@@ -157,7 +157,7 @@ export default function Cartoes() {
                 <span className="text-[15px] font-semibold text-musgo">
                   Paga em {porExtenso(d.fatura.pagamento.data)}, {moeda(d.fatura.pagamento.valor)}
                 </span>
-                <BotaoPagar discreto rotulo="Desfazer" acao={() => desfazerPagamentoFatura(d.fatura.pagamento!.id)} aoMudar={detalhe.recarregar} />
+                {d.fatura.vence >= isoData(new Date()) && (<BotaoPagar discreto rotulo="Desfazer" acao={() => desfazerPagamentoFatura(d.fatura.pagamento!.id)} aoMudar={detalhe.recarregar} />)}
               </div>
             ) : (
               !d.fatura.aberta &&

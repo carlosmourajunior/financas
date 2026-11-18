@@ -13,7 +13,9 @@ def quitar_vencidas(apps, schema_editor):
     from financas.models import Cartao
     from financas.servicos import quitar_faturas_vencidas
 
-    for cartao in Cartao.objects.all():
+    # Só as colunas que existiam nesta migração: campos novos do modelo ainda não estão no banco.
+    campos = ["id", "dono", "nome", "final", "limite", "dia_fechamento", "dia_vencimento", "criado_em", "atualizado_em"]
+    for cartao in Cartao.objects.only(*campos).order_by("pk"):
         quitar_faturas_vencidas(cartao, date.today())
 
 

@@ -385,3 +385,33 @@ class ImportarRecentesTests(APITestCase):
         r = self.importar().json()
         self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 0)
         self.assertEqual(len(r["pulados"]), 1)
+
+
+@override_settings(**{**LIGADO, "PLUGGY_ITEM_IDS": ["item-bb", "item-itau"]})
+@patch("openfinance.pluggy._get", side_effect=api_real)
+class CartaoDesativadoTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.usuario = Usuario.objects.create_user(email="eu@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(self.usuario)
+
+    def test_desativado_nao_volta_nem_pede_datas(self, _):
+        self.client.post("/api/openfinance/trazer-contas/")
+        ouro = Cartao.objects.get(final="5085")
+        r = self.client.patch(f"/api/cartoes/{ouro.id}/", {"ativo": False}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        ouro.refresh_from_db()
+        self.assertFalse(ouro.ativo)
+        ouro.nome = "BANCO DO BRASIL S/A"  # se fosse ativo, seria renomeado
+        ouro.save()
+
+        r = self.client.post("/api/openfinance/trazer-contas/").json()
+        self.assertEqual((r["cartoes"], r["renomeadas"]), ([], []))
+        self.assertEqual(Cartao.objects.filter(dono=self.usuario).count(), 3)
+        estado = {c["id"]: c for c in self.client.get("/api/openfinance/").json()["contas"]}
+        self.assertFalse(estado["bbc1"]["conferir_datas"])
+        self.assertTrue(estado["bbc2"]["conferir_datas"])
+
+        # Reativar é o mesmo PATCH.
+        self.client.patch(f"/api/cartoes/{ouro.id}/", {"ativo": True}, format="json")
+        self.assertTrue(self.client.get("/api/openfinance/").json()["contas"][3]["conferir_datas"])

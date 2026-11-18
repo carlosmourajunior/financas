@@ -29,7 +29,7 @@ class ContaSerializer(serializers.ModelSerializer):
 class CartaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cartao
-        fields = ["id", "nome", "final", "limite", "dia_fechamento", "dia_vencimento"]
+        fields = ["id", "nome", "final", "limite", "dia_fechamento", "dia_vencimento", "ativo"]
 
     def validate_final(self, valor):
         if valor and not (valor.isdigit() and len(valor) == 4):

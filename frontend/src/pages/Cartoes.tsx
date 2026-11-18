@@ -22,7 +22,9 @@ function mesAno(iso: string) {
 
 export default function Cartoes() {
   const lista = useApi<Pagina<Cartao>>('/cartoes/?limit=500')
-  const cartoes = lista.dados?.results ?? []
+  const todos = lista.dados?.results ?? []
+  const cartoes = todos.filter((x) => x.ativo !== false)
+  const desativados = todos.filter((x) => x.ativo === false)
   // ?cartao=&fecha= abre uma fatura específica (vindo de Lançamentos, por exemplo).
   const [busca, setBusca] = useSearchParams()
   const sel = busca.get('cartao') ?? ''
@@ -70,6 +72,17 @@ export default function Cartoes() {
     )
   }
 
+  const listaDesativados = desativados.length > 0 && (
+    <Secao titulo="Cartões desativados">
+      {desativados.map((x) => (
+        <div key={x.id} className="flex items-center justify-between gap-3 border-b border-linha py-3">
+          <span className="text-base font-semibold text-suave">{x.final ? `${x.nome} ${x.final}` : x.nome}</span>
+          <AtivarCartao cartao={x} aoMudar={lista.recarregar} />
+        </div>
+      ))}
+    </Secao>
+  )
+
   if (!c || novo) {
     return (
       <div className="mx-auto flex max-w-3xl flex-col gap-3.5 px-5 pt-5 lg:px-8 lg:pt-7">
@@ -86,6 +99,7 @@ export default function Cartoes() {
           />
           <FormCartao aoSalvar={salvo} />
         </div>
+        {listaDesativados}
       </div>
     )
   }
@@ -102,6 +116,7 @@ export default function Cartoes() {
         onChange={setSel}
       />
 
+      <AtivarCartao cartao={c} aoMudar={lista.recarregar} />
       {of.contas.some((x) => x.cartao === c.id && x.conferir_datas) && (
         <ConferirDatas
           key={c.id}
@@ -241,6 +256,7 @@ export default function Cartoes() {
           </Secao>
         </div>
       )}
+      {listaDesativados}
     </div>
   )
 }
@@ -301,5 +317,34 @@ function EscolherCategoria({
       </select>
       {erro && <span className="text-sm font-semibold text-ambar-texto">{erro}</span>}
     </span>
+  )
+}
+
+/** Desativar some com o cartão das faturas e previsões (o histórico fica); reativar traz de volta. */
+function AtivarCartao({ cartao, aoMudar }: { cartao: Cartao; aoMudar: () => void }) {
+  const [salvando, setSalvando] = useState(false)
+  const ativo = cartao.ativo !== false
+  async function trocar() {
+    setSalvando(true)
+    try {
+      await api(`/cartoes/${cartao.id}/`, { method: 'PATCH', body: { ativo: !ativo } })
+      aoMudar()
+    } finally {
+      setSalvando(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={trocar}
+      disabled={salvando}
+      className={
+        ativo
+          ? 'min-h-9 cursor-pointer self-end text-[13px] font-semibold text-suave underline underline-offset-2 disabled:opacity-60'
+          : 'min-h-10 cursor-pointer rounded-lg border border-borda bg-white px-3 text-sm font-bold disabled:opacity-60'
+      }
+    >
+      {salvando ? 'Salvando…' : ativo ? 'Não uso mais este cartão' : 'Reativar'}
+    </button>
   )
 }

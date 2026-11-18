@@ -417,7 +417,6 @@ class EmprestimoParcelasPagasTests(ApiBase):
         self.assertEqual(resumo(self.usuario, date.today())["saldo_em_conta"], antes)
 
 
-<<<<<<< HEAD
 class ContasTests(ApiBase):
     def setUp(self):
         super().setUp()
@@ -464,7 +463,15 @@ class ContasTests(ApiBase):
         self.assertEqual(self.client.get(f"/api/contas/{alheia.id}/detalhe/").status_code, 404)
         nomes = [c["nome"] for c in self.client.get("/api/contas/visao-geral/").data["contas"]]
         self.assertNotIn("Alheia", nomes)
-=======
+
+    def test_visao_geral_sem_poupanca(self):
+        r = self.client.get("/api/contas/visao-geral/?sem_poupanca=1")
+        self.assertEqual([c["nome"] for c in r.data["contas"]], ["Corrente"])
+        self.assertEqual(r.data["poupancas"], 1)
+        self.assertEqual(r.data["em_contas"], 380_000)
+        self.assertNotIn("Rendimento", [m["descricao"] for m in r.data["movimentos"]])
+
+
 class RepetirLancamentoTests(APITestCase):
     """Um lançamento único (vindo do banco) passa a recorrente ou parcelado depois."""
 
@@ -501,4 +508,3 @@ class RepetirLancamentoTests(APITestCase):
         l2 = self.lanc()
         r = self.client.post(f"/api/lancamentos/{l2.id}/repetir/", {"tipo": "parcelada", "parcela_atual": 4, "parcela_total": 3}, format="json")
         self.assertEqual(r.status_code, 400)
->>>>>>> c96d9557cc666c911b1c21932e55ae9682630f35

@@ -250,6 +250,8 @@ export interface DetalheConta {
 }
 
 export interface VisaoGeralContas {
+  poupancas: number
+  sem_poupanca: boolean
   saldo_contas: number
   faturas_pagas: number
   em_contas: number

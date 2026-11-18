@@ -14,6 +14,15 @@ import { useEnvio } from '../lib/useEnvio'
 
 const TIPOS: Record<Conta['tipo'], string> = { corrente: 'Conta corrente', poupanca: 'Poupança', dinheiro: 'Dinheiro' }
 const TODAS = 'todas'
+const CHAVE_POUPANCA = 'financas.sem-poupanca'
+
+function lerSemPoupanca() {
+  try {
+    return localStorage.getItem(CHAVE_POUPANCA) === '1'
+  } catch {
+    return false
+  }
+}
 
 const pagina = 'mx-auto flex max-w-3xl flex-col gap-3.5 px-5 pt-5 lg:px-8 lg:pt-7'
 
@@ -35,7 +44,19 @@ export default function Contas() {
   const sel = busca.get('conta') ?? TODAS
   const mes = busca.get('mes')
   const [novo, setNovo] = useState(false)
-  const conta = contas.find((c) => String(c.id) === sel)
+  // Esconder poupanças tira elas das abas, da lista e dos totais. Fica guardado neste aparelho.
+  const [semPoupanca, setSemPoupancaEstado] = useState(lerSemPoupanca)
+  const setSemPoupanca = (v: boolean) => {
+    setSemPoupancaEstado(v)
+    try {
+      localStorage.setItem(CHAVE_POUPANCA, v ? '1' : '0')
+    } catch {
+      // sem armazenamento, vale só nesta visita
+    }
+  }
+  const temPoupanca = contas.some((c) => c.tipo === 'poupanca')
+  const visiveis = semPoupanca ? contas.filter((c) => c.tipo !== 'poupanca') : contas
+  const conta = visiveis.find((c) => String(c.id) === sel)
   const aba = conta ? String(conta.id) : TODAS
 
   const ir = (id: string, m: string | null = mes) => {
@@ -104,14 +125,32 @@ export default function Contas() {
       {titulo}
       <Abas
         rotulo="Conta"
-        opcoes={[{ id: TODAS, label: 'Todas' }, ...contas.map((c) => ({ id: String(c.id), label: c.nome }))]}
+        opcoes={[{ id: TODAS, label: 'Todas' }, ...visiveis.map((c) => ({ id: String(c.id), label: c.nome }))]}
         valor={aba}
         onChange={(id) => ir(id)}
       />
       {conta ? (
         <UmaConta key={conta.id} id={conta.id} mes={mes} irMes={(m) => ir(String(conta.id), m)} aoMudar={lista.recarregar} />
       ) : (
-        <Todas mes={mes} irMes={(m) => ir(TODAS, m)} abrir={(id) => ir(String(id))} />
+        <Todas
+          mes={mes}
+          irMes={(m) => ir(TODAS, m)}
+          abrir={(id) => ir(String(id))}
+          semPoupanca={semPoupanca && temPoupanca}
+          filtro={
+            temPoupanca && (
+              <button
+                aria-pressed={semPoupanca}
+                onClick={() => setSemPoupanca(!semPoupanca)}
+                className={`min-h-9 shrink-0 cursor-pointer whitespace-nowrap rounded-[10px] border px-3 text-sm font-bold ${
+                  semPoupanca ? 'border-tinta bg-tinta text-white' : 'border-borda bg-white'
+                }`}
+              >
+                Esconder poupanças
+              </button>
+            )
+          }
+        />
       )}
     </div>
   )
@@ -191,8 +230,23 @@ function Destaque({ rotulo, valor, children }: { rotulo: string; valor: number; 
   )
 }
 
-function Todas({ mes, irMes, abrir }: { mes: string | null; irMes: (m: string) => void; abrir: (id: number) => void }) {
-  const r = useApi<VisaoGeralContas>(`/contas/visao-geral/${mes ? `?mes=${mes}` : ''}`)
+function Todas({
+  mes,
+  irMes,
+  abrir,
+  semPoupanca,
+  filtro,
+}: {
+  mes: string | null
+  irMes: (m: string) => void
+  abrir: (id: number) => void
+  semPoupanca: boolean
+  filtro: ReactNode
+}) {
+  const params = new URLSearchParams()
+  if (mes) params.set('mes', mes)
+  if (semPoupanca) params.set('sem_poupanca', '1')
+  const r = useApi<VisaoGeralContas>(`/contas/visao-geral/${params.size ? `?${params}` : ''}`)
   const d = r.dados
   if (r.erro) return <p className="py-10 text-center text-suave">Não foi possível carregar as contas. {r.erro}</p>
   if (!d) return <p className="py-10 text-center text-suave">Carregando…</p>
@@ -200,7 +254,7 @@ function Todas({ mes, irMes, abrir }: { mes: string | null; irMes: (m: string) =
   return (
     <div className="flex flex-col gap-7 pt-2">
       <section className="flex flex-col gap-3">
-        <Destaque rotulo="Em todas as contas agora" valor={d.em_contas}>
+        <Destaque rotulo={semPoupanca ? 'Nas contas, sem as poupanças' : 'Em todas as contas agora'} valor={d.em_contas}>
           {d.cartoes.length > 0 && (
             <p className="text-[15px] text-suave">
               Depois das faturas a pagar ({moeda(d.faturas_a_pagar)}) ficam{' '}
@@ -212,7 +266,7 @@ function Todas({ mes, irMes, abrir }: { mes: string | null; irMes: (m: string) =
         </Destaque>
       </section>
 
-      <Secao titulo="Contas">
+      <Secao titulo="Contas" acao={filtro}>
         {d.contas.map((c) => (
           <button
             key={c.id}
@@ -237,6 +291,11 @@ function Todas({ mes, irMes, abrir }: { mes: string | null; irMes: (m: string) =
             </span>
           </button>
         ))}
+        {d.sem_poupanca && d.poupancas > 0 && (
+          <p className="border-b border-linha py-3 text-sm text-suave">
+            {d.poupancas === 1 ? '1 poupança escondida' : `${d.poupancas} poupanças escondidas`}, fora do total e dos lançamentos
+          </p>
+        )}
         {d.faturas_pagas > 0 && (
           <div className="flex items-start gap-3 border-b border-linha py-3">
             <span className="flex grow flex-col gap-0.5">

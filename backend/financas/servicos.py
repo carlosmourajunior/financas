@@ -495,7 +495,6 @@ def resumo(dono, hoje: date) -> dict:
     }
 
 
-<<<<<<< HEAD
 # Contas -------------------------------------------------------------------
 
 
@@ -565,16 +564,18 @@ def detalhe_conta(conta: Conta, hoje: date, mes: date | None = None) -> dict:
     }
 
 
-def visao_geral(dono, hoje: date, mes: date | None = None) -> dict:
-    """Todas as contas e cartões juntos: saldo de cada um, o total e o que as faturas ainda vão levar."""
+def visao_geral(dono, hoje: date, mes: date | None = None, sem_poupanca: bool = False) -> dict:
+    """Todas as contas e cartões juntos: saldo de cada um, o total e o que as faturas ainda vão levar.
+
+    `sem_poupanca` deixa as poupanças de fora da lista, dos totais e dos lançamentos.
+    """
     mes = inicio_do_mes(mes or hoje)
     fim = fim_do_mes(mes)
     gerar_ocorrencias(dono, fim)
-    saldos = saldos_das_contas(dono)
-    contas = [
-        {"id": c.id, "nome": c.nome, "tipo": c.tipo, "saldo": saldos[c.id], "pluggy": _tem_pluggy(c)}
-        for c in Conta.objects.filter(dono=dono).select_related("vinculo_pluggy")
-    ]
+    todas = Conta.objects.filter(dono=dono).select_related("vinculo_pluggy")
+    escolhidas = todas.exclude(tipo=Conta.Tipo.POUPANCA) if sem_poupanca else todas
+    saldos = {i: s for i, s in saldos_das_contas(dono).items() if i in {c.id for c in escolhidas}}
+    contas = [{"id": c.id, "nome": c.nome, "tipo": c.tipo, "saldo": saldos[c.id], "pluggy": _tem_pluggy(c)} for c in escolhidas]
     # A fatura paga ainda não diz de qual conta saiu, então entra no total e não no saldo de uma conta.
     faturas_pagas = _soma(PagamentoFatura.objects.filter(dono=dono))
 
@@ -600,8 +601,10 @@ def visao_geral(dono, hoje: date, mes: date | None = None) -> dict:
 
     em_contas = sum(saldos.values()) - faturas_pagas
     a_pagar_cartoes = sum(c["fatura"] for c in cartoes if not c["paga"] and c["fatura"] > 0)
-    qs = Lancamento.objects.filter(dono=dono, conta__isnull=False)
+    qs = Lancamento.objects.filter(dono=dono, conta__in=list(saldos))
     return {
+        "poupancas": todas.filter(tipo=Conta.Tipo.POUPANCA).count(),
+        "sem_poupanca": sem_poupanca,
         "saldo_contas": sum(saldos.values()),
         "faturas_pagas": faturas_pagas,
         "em_contas": em_contas,
@@ -612,7 +615,8 @@ def visao_geral(dono, hoje: date, mes: date | None = None) -> dict:
         "mes": _no_mes(qs, mes, fim),
         "movimentos": [_movimento(l) for l in qs.filter(data__gte=mes, data__lte=fim).select_related("categoria", "conta").order_by("-data", "-id")],
     }
-=======
+
+
 @transaction.atomic
 def repetir_lancamento(lanc: Lancamento, tipo: str, *, frequencia: str = Frequencia.MENSAL, parcela_atual: int = 1, parcela_total: int = 1) -> int:
     """Um lançamento único (vindo do banco, por exemplo) passa a recorrente ou a parcela k de n.
@@ -663,4 +667,3 @@ def repetir_lancamento(lanc: Lancamento, tipo: str, *, frequencia: str = Frequen
         )
     Lancamento.objects.bulk_create(seguintes)
     return len(seguintes)
->>>>>>> c96d9557cc666c911b1c21932e55ae9682630f35

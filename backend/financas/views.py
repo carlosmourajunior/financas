@@ -49,8 +49,9 @@ class ContaViewSet(DoUsuarioViewSet):
 
     @action(detail=False, url_path="visao-geral")
     def visao_geral(self, request):
-        """Todas as contas e cartões juntos, com os lançamentos em conta do mês (?mes=AAAA-MM)."""
-        return Response(visao_geral(request.user, date.today(), ler_mes(request.query_params.get("mes"))))
+        """Todas as contas e cartões juntos, com os lançamentos em conta do mês (?mes=AAAA-MM, ?sem_poupanca=1)."""
+        sem_poupanca = request.query_params.get("sem_poupanca") in ("1", "true")
+        return Response(visao_geral(request.user, date.today(), ler_mes(request.query_params.get("mes")), sem_poupanca=sem_poupanca))
 
     @action(detail=True)
     def detalhe(self, request, pk=None):

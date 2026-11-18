@@ -144,6 +144,10 @@ LOGGING = {
 }
 
 
+# Cadastro pelo site. Numa instância pessoal, deixe fechado (CADASTRO_ABERTO=0) e crie as
+# contas com `python manage.py criar_usuario`. O compose de produção já fecha por padrão.
+CADASTRO_ABERTO = env_bool("CADASTRO_ABERTO", True)
+
 # Open Finance pela Pluggy (opcional). Ligado só com as três primeiras preenchidas.
 # Uso pessoal com o MeuPluggy: os itens são do dono da instância, então só os e-mails
 # de PLUGGY_USUARIOS veem esses dados. Sem nada disso, o módulo some da tela.

@@ -80,3 +80,32 @@ class SegurancaDaContaTests(APITestCase):
         # outro IP continua entrando
         r = self.client.post("/api/auth/token/", {"email": "b@exemplo.com", "password": "senha-forte-123"}, format="json", HTTP_CF_CONNECTING_IP="203.0.113.10")
         self.assertEqual(r.status_code, 200)
+
+
+class CadastroFechadoTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    @override_settings(CADASTRO_ABERTO=False)
+    def test_cadastro_fechado_nao_cria_conta(self):
+        self.assertEqual(self.client.get("/api/auth/cadastro/").data, {"aberto": False})
+        r = self.client.post("/api/auth/cadastro/", {"nome": "X", "email": "x@exemplo.com", "senha": "senha-forte-123"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(get_user_model().objects.filter(email="x@exemplo.com").exists())
+
+    def test_cadastro_aberto_por_padrao_fora_da_producao(self):
+        self.assertEqual(self.client.get("/api/auth/cadastro/").data, {"aberto": True})
+
+    @override_settings(CADASTRO_ABERTO=False)
+    def test_comando_criar_usuario(self):
+        from unittest import mock
+
+        from django.core.management import call_command
+
+        with mock.patch("getpass.getpass", return_value="senha-forte-123"):
+            call_command("criar_usuario", email="Novo@Exemplo.com", nome="Novo", stdout=open("/dev/null", "w"))
+        u = get_user_model().objects.get(email="novo@exemplo.com")
+        self.assertTrue(u.check_password("senha-forte-123"))
+        self.assertTrue(Categoria.objects.filter(dono=u).exists())
+        r = self.client.post("/api/auth/token/", {"email": "novo@exemplo.com", "password": "senha-forte-123"}, format="json")
+        self.assertEqual(r.status_code, 200)

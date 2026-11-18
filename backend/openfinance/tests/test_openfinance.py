@@ -430,3 +430,14 @@ class ParcelasNaFaturaAbertaTests(APITestCase):
         ]
         lida = conversao.fatura_aberta("Nubank", "", {"fat-out"}, date(2026, 10, 9), date(2026, 12, 8), date(2026, 12, 15), transacoes)
         self.assertEqual(sorted((i.descricao, i.parcela_atual) for i in lida.itens), [("Mercado", None), ("TV", 4)])
+
+
+class TotalDoBancoTests(APITestCase):
+    def test_diferenca_para_o_total_do_banco_vira_linha(self):
+        fatura = {"id": "f", "dueDate": "2026-10-15T00:00:00Z", "billClosingDate": "2026-10-08T00:00:00Z", "totalAmount": 500.9}
+        lida = conversao.fatura_fechada("Nubank", "", [fatura], fatura, TRANSACOES_CARTAO[:3] and [
+            {**t, "creditCardMetadata": {**t["creditCardMetadata"], "billId": "f"}} for t in TRANSACOES_CARTAO[:3]
+        ])
+        self.assertEqual(lida.itens[-1].valor, 5_000)
+        self.assertIn("Juros", lida.itens[-1].descricao)
+        self.assertTrue(lida.conferida)

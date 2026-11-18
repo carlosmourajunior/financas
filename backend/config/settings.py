@@ -116,6 +116,11 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 100,
+    # Só as views com throttle_scope usam (login e cadastro, em usuarios/limites.py).
+    "DEFAULT_THROTTLE_RATES": {
+        "login": os.environ.get("LIMITE_LOGIN", "10/min"),
+        "cadastro": os.environ.get("LIMITE_CADASTRO", "5/hour"),
+    },
 }
 
 SIMPLE_JWT = {
@@ -138,6 +143,10 @@ LOGGING = {
     "root": {"handlers": ["console"], "level": "WARNING"},
 }
 
+
+# Cadastro pelo site. Numa instância pessoal, deixe fechado (CADASTRO_ABERTO=0) e crie as
+# contas com `python manage.py criar_usuario`. O compose de produção já fecha por padrão.
+CADASTRO_ABERTO = env_bool("CADASTRO_ABERTO", True)
 
 # Open Finance pela Pluggy (opcional). Ligado só com as três primeiras preenchidas.
 # Uso pessoal com o MeuPluggy: os itens são do dono da instância, então só os e-mails

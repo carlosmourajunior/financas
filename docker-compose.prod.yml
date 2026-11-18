@@ -33,6 +33,8 @@ services:
       DJANGO_ALLOWED_HOSTS: ${DOMINIO:?defina DOMINIO no .env}
       CORS_ALLOWED_ORIGINS: https://${DOMINIO}
       CSRF_TRUSTED_ORIGINS: https://${DOMINIO}
+      # Fechado: as contas são criadas com `docker compose exec backend python manage.py criar_usuario`
+      CADASTRO_ABERTO: ${CADASTRO_ABERTO:-0}
       DATABASE_URL: postgres://financas:${POSTGRES_PASSWORD}@db:5432/financas
       # Alertas de segurança no Telegram (backend/alertas). Vazio = só log.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}

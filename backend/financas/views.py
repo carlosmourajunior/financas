@@ -17,7 +17,7 @@ from .serializers import (
     PagamentoFaturaSerializer,
     RecorrenciaSerializer,
 )
-from .servicos import detalhe_cartao, faturas_do_mes, fim_do_mes, gerar_ocorrencias, repetir_lancamento, resumo
+from .servicos import detalhe_cartao, detalhe_conta, faturas_do_mes, fim_do_mes, gerar_ocorrencias, quitar_passados, repetir_lancamento, resumo, visao_geral
 
 
 def ler_mes(valor: str | None) -> date | None:
@@ -46,6 +46,17 @@ class DoUsuarioViewSet(viewsets.ModelViewSet):
 class ContaViewSet(DoUsuarioViewSet):
     model = Conta
     serializer_class = ContaSerializer
+
+    @action(detail=False, url_path="visao-geral")
+    def visao_geral(self, request):
+        """Todas as contas e cartões juntos, com os lançamentos em conta do mês (?mes=AAAA-MM, ?sem_poupanca=1)."""
+        sem_poupanca = request.query_params.get("sem_poupanca") in ("1", "true")
+        return Response(visao_geral(request.user, date.today(), ler_mes(request.query_params.get("mes")), sem_poupanca=sem_poupanca))
+
+    @action(detail=True)
+    def detalhe(self, request, pk=None):
+        """Saldo da conta e os lançamentos do mês (?mes=AAAA-MM, padrão o atual)."""
+        return Response(detalhe_conta(self.get_object(), date.today(), ler_mes(request.query_params.get("mes"))))
 
 
 class CartaoViewSet(DoUsuarioViewSet):
@@ -132,6 +143,7 @@ class LancamentoViewSet(DoUsuarioViewSet):
         mes = ler_mes(p.get("mes"))
         if mes:
             gerar_ocorrencias(self.request.user, fim_do_mes(mes))
+            quitar_passados(self.request.user, date.today())
             qs = qs.filter(data__gte=mes, data__lte=fim_do_mes(mes))
         for campo in ("natureza", "tipo", "cartao", "conta", "categoria"):
             if p.get(campo):

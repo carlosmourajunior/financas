@@ -6,6 +6,8 @@ from rest_framework.test import APITestCase
 
 from .models import Cartao, Conta, Emprestimo, Lancamento, PagamentoFatura, Recorrencia
 from .servicos import (
+    fatura_que_fecha_em,
+    acertar_pagamentos_fora_do_fechamento,
     detalhe_cartao,
     fatura_aberta,
     fim_do_mes,
@@ -160,12 +162,15 @@ class PagamentoDeFaturaTests(ApiBase):
         Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Antiga", valor=5_000, natureza="despesa", data=date(2026, 9, 1))
         Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Nova", valor=7_000, natureza="despesa", data=date(2026, 10, 20))
 
-    def test_fatura_vencida_sem_pagamento_fica_vencida(self):
+    def test_fatura_que_venceu_antes_de_hoje_conta_como_paga(self):
+        # No dia do vencimento ainda está pendente.
+        r = resumo(self.usuario, date(2026, 9, 10))
+        self.assertEqual([(v["tipo"], v["valor"]) for v in r["vencem_hoje"]], [("fatura", 5_000)])
+        # No dia seguinte conta como paga no vencimento: sai do saldo e não fica vencida.
         r = resumo(self.usuario, date(2026, 10, 27))
-        self.assertEqual(r["saldo_em_conta"], 100_000)
-        self.assertEqual([(v["tipo"], v["valor"], v["data"]) for v in r["vencidas"]], [("fatura", 5_000, date(2026, 9, 10))])
-        # Vencida de mês anterior também entra no que ainda vai sair.
-        self.assertEqual(r["a_vencer"], 5_000)
+        self.assertEqual(r["saldo_em_conta"], 100_000 - 5_000)
+        self.assertEqual(r["vencidas"], [])
+        self.assertEqual(PagamentoFatura.objects.get(cartao=self.cartao).data, date(2026, 9, 10))
 
     def test_pagar_fatura_tira_do_saldo_e_das_vencidas(self):
         r = self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json")
@@ -181,7 +186,8 @@ class PagamentoDeFaturaTests(ApiBase):
     def test_desfazer_pagamento(self):
         pid = self.client.post("/api/pagamentos-fatura/", {"cartao": self.cartao.id, "fecha": "2026-09-03"}, format="json").data["id"]
         self.assertEqual(self.client.delete(f"/api/pagamentos-fatura/{pid}/").status_code, 204)
-        self.assertEqual(len(resumo(self.usuario, date(2026, 10, 27))["vencidas"]), 1)
+        # No dia do vencimento, desfeito, volta a vencer hoje.
+        self.assertEqual(len(resumo(self.usuario, date(2026, 9, 10))["vencem_hoje"]), 1)
 
     def test_nao_paga_fatura_de_cartao_alheio(self):
         outro = criar_usuario("b@exemplo.com")
@@ -288,14 +294,53 @@ class VencidasTests(ApiBase):
         r = resumo(self.usuario, date(2026, 10, 27))
         self.assertEqual([v["id"] for v in r["vencem_hoje"]], [luz.id])
         self.assertEqual(r["vencidas"], [])
-        r = resumo(self.usuario, date(2026, 10, 28))
-        self.assertEqual([v["nome"] for v in r["vencidas"]], ["Luz"])
-
-        # Marcar como pago pela API tira das vencidas e do saldo.
+        # Marcar como pago pela API tira de hoje e entra no saldo.
         self.assertEqual(self.client.patch(f"/api/lancamentos/{luz.id}/", {"pago": True}, format="json").status_code, 200)
+        r = resumo(self.usuario, date(2026, 10, 27))
+        self.assertEqual(r["vencem_hoje"], [])
+        self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000)
+
+    def test_lancamento_antes_de_hoje_conta_como_pago(self):
+        luz = Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Luz", valor=9_000, natureza="despesa", data=date(2026, 10, 27), pago=False
+        )
+        salario = Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Salário", valor=50_000, natureza="receita", data=date(2026, 10, 27), pago=False
+        )
+        futuro = Lancamento.objects.create(
+            dono=self.usuario, conta=self.conta, descricao="Aluguel", valor=1_000, natureza="despesa", data=date(2026, 10, 28), pago=False
+        )
         r = resumo(self.usuario, date(2026, 10, 28))
         self.assertEqual(r["vencidas"], [])
-        self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000)
+        luz.refresh_from_db(); salario.refresh_from_db(); futuro.refresh_from_db()
+        self.assertTrue(luz.pago and salario.pago)
+        self.assertFalse(futuro.pago)
+        self.assertEqual(r["saldo_em_conta"], 100_000 - 9_000 + 50_000)
+
+    def test_vencimento_informado_pelo_banco_vale_para_a_fatura(self):
+        # Itaú: fecha no dia 25 e vence no dia 1 do mês seguinte.
+        self.cartao.dia_fechamento, self.cartao.dia_vencimento = 25, 1
+        self.cartao.vencimentos = {"2026-09": "2026-10-02"}
+        self.cartao.save()
+        self.assertEqual(fatura_que_fecha_em(self.cartao, date(2026, 9, 25)).vence, date(2026, 10, 2))
+        self.assertEqual(fatura_que_fecha_em(self.cartao, date(2026, 8, 25)).vence, date(2026, 9, 1))
+
+    def test_pagamento_no_dia_do_fechamento_vai_para_o_vencimento(self):
+        self.cartao.dia_fechamento, self.cartao.dia_vencimento = 25, 1
+        self.cartao.save()
+        p = PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 8, 25), valor=1, data=date(2026, 8, 25))
+        acertar_pagamentos_fora_do_fechamento(self.cartao)
+        p.refresh_from_db()
+        self.assertEqual(p.data, date(2026, 9, 1))
+
+    def test_pagamento_em_dia_que_nao_fecha_mais_vai_para_o_fechamento_certo(self):
+        # O Visa fecha dia 3. Um pagamento antigo gravado no dia 2 e outro no dia certo do mesmo mês: o antigo sai.
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 9, 2), valor=1, data=date(2026, 9, 10))
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 9, 3), valor=1, data=date(2026, 9, 10))
+        # Sozinho no mês, o gravado no dia errado só muda de dia.
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2026, 8, 5), valor=1, data=date(2026, 8, 10))
+        acertar_pagamentos_fora_do_fechamento(self.cartao)
+        self.assertEqual(sorted(PagamentoFatura.objects.filter(cartao=self.cartao).values_list("fecha", flat=True)), [date(2026, 8, 3), date(2026, 9, 3)])
 
     def test_receita_nao_e_conta_vencida(self):
         Lancamento.objects.create(
@@ -417,6 +462,68 @@ class EmprestimoParcelasPagasTests(ApiBase):
         self.assertEqual(resumo(self.usuario, date.today())["saldo_em_conta"], antes)
 
 
+class ContasTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        self.poupanca = Conta.objects.create(dono=self.usuario, nome="Poupança", tipo="poupanca", saldo_inicial=50_000)
+        hoje = date.today()
+        self.lancar(descricao="Salário", natureza="receita", valor=300_000, conta=self.conta.id)
+        self.lancar(descricao="Luz", valor=20_000, conta=self.conta.id)
+        self.lancar(descricao="Aluguel", valor=150_000, conta=self.conta.id, data=str(fim_do_mes(hoje) + timedelta(days=1)), pago=False)
+        self.lancar(descricao="Rendimento", natureza="receita", valor=1_000, conta=self.poupanca.id)
+        self.lancar(descricao="Mercado", valor=9_000, cartao=self.cartao.id)
+
+    def test_detalhe_mostra_saldo_e_lancamentos_so_da_conta(self):
+        r = self.client.get(f"/api/contas/{self.conta.id}/detalhe/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["saldo"], 100_000 + 300_000 - 20_000)
+        self.assertEqual(r.data["mes"]["entrou"], 300_000)
+        self.assertEqual(r.data["mes"]["saiu"], 20_000)
+        self.assertEqual({m["descricao"] for m in r.data["movimentos"]}, {"Salário", "Luz"})
+        self.assertFalse(r.data["conta"]["pluggy"])
+
+    def test_detalhe_de_outro_mes(self):
+        proximo = fim_do_mes(date.today()) + timedelta(days=1)
+        r = self.client.get(f"/api/contas/{self.conta.id}/detalhe/?mes={proximo:%Y-%m}")
+        self.assertEqual([m["descricao"] for m in r.data["movimentos"]], ["Aluguel"])
+        self.assertEqual(r.data["mes"]["a_pagar"], 150_000)
+
+    def test_visao_geral_soma_as_contas_e_desconta_faturas(self):
+        PagamentoFatura.objects.create(dono=self.usuario, cartao=self.cartao, fecha=date(2020, 1, 3), valor=5_000, data=date(2020, 1, 10))
+        r = self.client.get("/api/contas/visao-geral/")
+        self.assertEqual(r.status_code, 200)
+        saldos = {c["nome"]: c["saldo"] for c in r.data["contas"]}
+        self.assertEqual(saldos, {"Corrente": 380_000, "Poupança": 51_000})
+        self.assertEqual(r.data["faturas_pagas"], 5_000)
+        self.assertEqual(r.data["em_contas"], 431_000 - 5_000)
+        # O total bate com o saldo do Início.
+        self.assertEqual(r.data["em_contas"], self.client.get("/api/resumo/").data["saldo_em_conta"])
+        self.assertEqual(r.data["faturas_a_pagar"], 9_000)
+        self.assertEqual(r.data["depois_das_faturas"], 426_000 - 9_000)
+        self.assertEqual(len(r.data["movimentos"]), 3)  # a compra no cartão fica de fora
+
+    def test_conta_de_outro_usuario_nao_aparece(self):
+        outro = criar_usuario("b@exemplo.com")
+        alheia = Conta.objects.create(dono=outro, nome="Alheia")
+        self.assertEqual(self.client.get(f"/api/contas/{alheia.id}/detalhe/").status_code, 404)
+        nomes = [c["nome"] for c in self.client.get("/api/contas/visao-geral/").data["contas"]]
+        self.assertNotIn("Alheia", nomes)
+
+    def test_visao_geral_ignora_cartao_desativado(self):
+        self.cartao.ativo = False
+        self.cartao.save()
+        r = self.client.get("/api/contas/visao-geral/")
+        self.assertEqual(r.data["cartoes"], [])
+        self.assertEqual(r.data["faturas_a_pagar"], 0)
+
+    def test_visao_geral_sem_poupanca(self):
+        r = self.client.get("/api/contas/visao-geral/?sem_poupanca=1")
+        self.assertEqual([c["nome"] for c in r.data["contas"]], ["Corrente"])
+        self.assertEqual(r.data["poupancas"], 1)
+        self.assertEqual(r.data["em_contas"], 380_000)
+        self.assertNotIn("Rendimento", [m["descricao"] for m in r.data["movimentos"]])
+
+
 class RepetirLancamentoTests(APITestCase):
     """Um lançamento único (vindo do banco) passa a recorrente ou parcelado depois."""
 
@@ -473,3 +580,49 @@ class CartaoDesativadoFaturasTests(APITestCase):
         depois = len(self.client.get(f"/api/faturas/?mes={mes}").json()) + len(self.client.get(f"/api/faturas/?mes={proximo}").json())
         self.assertEqual(depois, 0)
         self.assertEqual(self.client.get("/api/resumo/").status_code, 200)
+
+
+class CategoriaTests(ApiBase):
+    def test_cria_categoria_com_cor_escolhida(self):
+        r = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa", "cor": "#2b7a9b"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["cor"], "#2B7A9B")
+
+    def test_sem_cor_ganha_uma_da_paleta(self):
+        r = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertRegex(r.data["cor"], r"^#[0-9A-F]{6}$")
+
+    def test_cor_invalida_e_nome_repetido(self):
+        r = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa", "cor": "azul"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("cor", r.data)
+        self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json")
+        r = self.client.post("/api/categorias/", {"nome": " pets ", "natureza": "despesa"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("nome", r.data)
+
+    def test_muda_cor_e_resumo_traz_a_cor(self):
+        c = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json").data
+        self.client.patch(f"/api/categorias/{c['id']}/", {"cor": "#D14D72"}, format="json")
+        self.lancar(descricao="Ração", valor=9_000, conta=self.conta.id, categoria=c["id"])
+        r = resumo(self.usuario, date.today())
+        self.assertIn({"id": c["id"], "nome": "Pets", "cor": "#D14D72", "valor": 9_000}, r["categorias"])
+
+    def test_excluir_categoria_deixa_lancamento_sem_categoria(self):
+        c = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json").data
+        lanc = self.lancar(descricao="Ração", conta=self.conta.id, categoria=c["id"]).data
+        self.assertEqual(self.client.delete(f"/api/categorias/{c['id']}/").status_code, 204)
+        self.assertIsNone(Lancamento.objects.get(pk=lanc["id"]).categoria_id)
+
+
+class DeOndeVeioTests(ApiBase):
+    def test_receitas_por_categoria_no_resumo(self):
+        from .models import Categoria
+
+        salario = Categoria.objects.create(dono=self.usuario, nome="Salário X", natureza="receita")
+        self.lancar(descricao="Salário", natureza="receita", valor=300_000, conta=self.conta.id, categoria=salario.id)
+        self.lancar(descricao="Pix", natureza="receita", valor=5_000, conta=self.conta.id)
+        self.lancar(descricao="Estorno", natureza="receita", valor=1_000, cartao=self.cartao.id)
+        r = self.client.get("/api/resumo/").data["receitas_categorias"]
+        self.assertEqual([(c["nome"], c["valor"]) for c in r], [("Salário X", 300_000), ("Sem categoria", 5_000)])

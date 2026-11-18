@@ -43,7 +43,7 @@ export function Abas<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div role="tablist" aria-label={rotulo} className="flex gap-6 border-b border-linha">
+    <div role="tablist" aria-label={rotulo} className="flex gap-6 overflow-x-auto border-b border-linha">
       {opcoes.map((o) => {
         const ativa = o.id === valor
         return (
@@ -52,7 +52,7 @@ export function Abas<T extends string>({
             role="tab"
             aria-selected={ativa}
             onClick={() => onChange(o.id)}
-            className={`-mb-px min-h-11 cursor-pointer border-b-[3px] text-base ${
+            className={`-mb-px min-h-11 shrink-0 cursor-pointer whitespace-nowrap border-b-[3px] text-base ${
               ativa ? 'border-tinta font-bold text-tinta' : 'border-transparent font-semibold text-suave'
             }`}
           >
@@ -64,10 +64,21 @@ export function Abas<T extends string>({
   )
 }
 
-export function Barra({ largura, cor = 'bg-tinta', altura = 'h-2' }: { largura: string; cor?: string; altura?: string }) {
+export function Barra({
+  largura,
+  cor = 'bg-tinta',
+  corHex,
+  altura = 'h-2',
+}: {
+  largura: string
+  cor?: string
+  /** Cor exata (a da categoria, por exemplo); tem prioridade sobre `cor`. */
+  corHex?: string
+  altura?: string
+}) {
   return (
     <div className={`${altura} rounded-full bg-linha`}>
-      <div className={`${altura} rounded-full ${cor}`} style={{ width: largura }} />
+      <div className={`${altura} rounded-full ${corHex ? '' : cor}`} style={{ width: largura, backgroundColor: corHex }} />
     </div>
   )
 }

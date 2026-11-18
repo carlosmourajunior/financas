@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Layout from './components/Layout'
 import { useAuth } from './lib/auth'
 import Cartoes from './pages/Cartoes'
+import Categorias from './pages/Categorias'
+import Contas from './pages/Contas'
 import Emprestimos from './pages/Emprestimos'
 import Importar from './pages/Importar'
 import Inicio from './pages/Inicio'
@@ -39,8 +41,10 @@ export default function App() {
       >
         <Route index element={<Inicio />} />
         <Route path="/lancamentos" element={<Lancamentos />} />
+        <Route path="/contas" element={<Contas />} />
         <Route path="/cartoes" element={<Cartoes />} />
         <Route path="/emprestimos" element={<Emprestimos />} />
+        <Route path="/categorias" element={<Categorias />} />
         <Route path="/importar" element={<Importar />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

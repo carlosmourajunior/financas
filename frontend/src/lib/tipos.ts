@@ -30,6 +30,7 @@ export interface Categoria {
   id: number
   nome: string
   natureza: Natureza
+  cor: string
 }
 
 export interface Lancamento {
@@ -64,7 +65,8 @@ export interface Resumo {
   vencem_hoje: Pendencia[]
   entrou: number
   saiu: number
-  categorias: { nome: string; valor: number }[]
+  categorias: { id: number | null; nome: string; cor: string; valor: number }[]
+  receitas_categorias: { id: number | null; nome: string; cor: string; valor: number }[]
   parcelas_anteriores: number
   creditos_cartao: number
   sai_da_conta: number
@@ -216,4 +218,63 @@ export interface ExtratoImportado {
   emprestimos?: number
   transferencias?: number
   repetidos?: number
+}
+
+export interface MovimentoEmConta {
+  id: number
+  data: string
+  descricao: string
+  valor: number
+  natureza: Natureza
+  pago: boolean
+  tipo: Tipo
+  categoria: string | null
+  categoria_cor: string | null
+  conta: number | null
+  conta_nome: string | null
+  parcela_atual: number | null
+  parcela_total: number | null
+}
+
+export interface NumerosDoMes {
+  inicio: string
+  fim: string
+  entrou: number
+  saiu: number
+  a_receber: number
+  a_pagar: number
+}
+
+export interface DetalheConta {
+  conta: Conta & { pluggy: boolean }
+  saldo: number
+  previsto: number
+  mes: NumerosDoMes
+  movimentos: MovimentoEmConta[]
+}
+
+export interface VisaoGeralContas {
+  poupancas: number
+  sem_poupanca: boolean
+  saldo_contas: number
+  faturas_pagas: number
+  em_contas: number
+  faturas_a_pagar: number
+  depois_das_faturas: number
+  contas: { id: number; nome: string; tipo: Conta['tipo']; saldo: number; pluggy: boolean }[]
+  cartoes: {
+    id: number
+    nome: string
+    final: string
+    fatura: number
+    fecha: string
+    vence: string
+    aberta: boolean
+    paga: boolean
+    limite: number
+    disponivel: number
+    pluggy: boolean
+  }[]
+  mes: NumerosDoMes
+  movimentos: MovimentoEmConta[]
 }

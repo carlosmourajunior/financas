@@ -1,3 +1,4 @@
+import { COR_SEM_CATEGORIA } from '../components/Categorias'
 import type { Pagina } from './api'
 import type { Cartao, Categoria, Conta, Lancamento } from './tipos'
 import { useApi } from './useApi'
@@ -20,8 +21,13 @@ export function useCadastros() {
     return listaContas.find((x) => x.id === l.conta)?.nome ?? 'Sem conta'
   }
 
-  function categoria(l: Lancamento) {
+  function categoria(l: Pick<Lancamento, 'categoria'>) {
     return listaCategorias.find((x) => x.id === l.categoria)?.nome ?? 'Sem categoria'
+  }
+
+  /** Cor da categoria; sem categoria, um cinza neutro. */
+  function cor(id: number | null | undefined) {
+    return listaCategorias.find((x) => x.id === id)?.cor ?? COR_SEM_CATEGORIA
   }
 
   return {
@@ -37,6 +43,8 @@ export function useCadastros() {
     },
     meio,
     categoria,
+    cor,
+    recarregarCategorias: categorias.recarregar,
   }
 }
 

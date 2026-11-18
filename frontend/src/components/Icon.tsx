@@ -7,6 +7,7 @@ const paths = {
       <path d="M2 10h20" />
     </>
   ),
+  banco: <path d="M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 21h18M12 3l9 5H3z" />,
   importar: <path d="M12 16V4M7 9l5-5 5 5M4 20h16" />,
   mais: <path d="M12 5v14M5 12h14" />,
   olho: (
@@ -23,6 +24,12 @@ const paths = {
     <>
       <circle cx="11" cy="11" r="7" />
       <path d="m20 20-3.5-3.5" />
+    </>
+  ),
+  etiqueta: (
+    <>
+      <path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z" />
+      <circle cx="7.5" cy="7.5" r="1.5" />
     </>
   ),
   emprestimo: <path d="M7 7h11l-3-3M17 17H6l3 3" />,

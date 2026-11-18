@@ -1,11 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
+import { RotuloCategoria, SeletorCategoria } from '../components/Categorias'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Titulo } from '../components/ui'
 import { api, type Pagina } from '../lib/api'
-import { useCadastros } from '../lib/cadastros'
+import { nomeCartao, useCadastros } from '../lib/cadastros'
 import { MESES, isoData, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda } from '../lib/format'
 import { desfazerPagamentoFatura, excluirLancamento, marcarLancamento, pagarFatura } from '../lib/pagar'
@@ -28,7 +29,7 @@ interface Linha {
   chave: string
   data: string
   titulo: string
-  detalhe: string
+  detalhe: ReactNode
   valor: number
   natureza: 'despesa' | 'receita'
   pago: boolean
@@ -38,6 +39,28 @@ interface Linha {
   lancamento?: number
   categoria?: number | null
   fatura?: FaturaDoMes
+  /** De onde vem: `c<id>` conta, `k<id>` cartão, `sem` sem conta. */
+  origem: string
+}
+
+// Contas e cartões escondidos da lista. Guarda os escondidos, então uma conta nova já aparece.
+const CHAVE_OCULTOS = 'financas.lancamentos.ocultos'
+
+function lerOcultos(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(CHAVE_OCULTOS) ?? '[]')
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function guardarOcultos(v: string[]) {
+  try {
+    localStorage.setItem(CHAVE_OCULTOS, JSON.stringify(v))
+  } catch {
+    // sem armazenamento, vale só nesta visita
+  }
 }
 
 function situacao(l: Linha, hoje: string) {
@@ -51,10 +74,11 @@ function situacao(l: Linha, hoje: string) {
 }
 
 /** O botão de pagar ou desfazer da linha, ou nada. */
-function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categoria[]) {
+function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categoria[], aoCriarCategoria: () => void) {
   const f = l.fatura
   if (f) {
-    if (f.pagamento) return <BotaoPagar discreto rotulo="Desfazer pagamento" acao={() => desfazerPagamentoFatura(f.pagamento!.id)} aoMudar={aoMudar} />
+    // O que venceu antes de hoje conta como pago: não tem o que desfazer.
+    if (f.pagamento) return f.vence < hoje ? null : <BotaoPagar discreto rotulo="Desfazer pagamento" acao={() => desfazerPagamentoFatura(f.pagamento!.id)} aoMudar={aoMudar} />
     // Fatura que ainda não fechou pode receber compras: o pagamento fica para depois do fechamento.
     if (f.fecha >= hoje || f.total <= 0) return null
     return <BotaoPagar rotulo="Marcar como paga" acao={() => pagarFatura(f.cartao, f.fecha)} aoMudar={aoMudar} />
@@ -62,7 +86,7 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categor
   if (!l.lancamento) return null
   const id = l.lancamento
   const pagar = l.pago ? (
-    <BotaoPagar discreto rotulo="Desfazer" acao={() => marcarLancamento(id, false)} aoMudar={aoMudar} />
+    l.data < hoje ? null : <BotaoPagar discreto rotulo="Desfazer" acao={() => marcarLancamento(id, false)} aoMudar={aoMudar} />
   ) : (
     <BotaoPagar
       rotulo={l.natureza === 'receita' ? 'Marcar como recebido' : 'Marcar como pago'}
@@ -78,7 +102,7 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categor
       antes={
         <>
           {pagar}
-          <Ajustar l={l} id={id} categorias={categorias.filter((c) => c.natureza === l.natureza)} aoMudar={aoMudar} />
+          <Ajustar l={l} id={id} categorias={categorias} aoMudar={aoMudar} aoCriarCategoria={aoCriarCategoria} />
         </>
       }
     />
@@ -86,7 +110,19 @@ function acaoDa(l: Linha, hoje: string, aoMudar: () => void, categorias: Categor
 }
 
 /** Categoria e, para um lançamento único (vindo do banco, por exemplo), marcar como recorrente ou parcela. */
-function Ajustar({ l, id, categorias, aoMudar }: { l: Linha; id: number; categorias: Categoria[]; aoMudar: () => void }) {
+function Ajustar({
+  l,
+  id,
+  categorias,
+  aoMudar,
+  aoCriarCategoria,
+}: {
+  l: Linha
+  id: number
+  categorias: Categoria[]
+  aoMudar: () => void
+  aoCriarCategoria: () => void
+}) {
   const [aberto, setAberto] = useState(false)
   const [atual, setAtual] = useState('1')
   const [total, setTotal] = useState('')
@@ -121,24 +157,20 @@ function Ajustar({ l, id, categorias, aoMudar }: { l: Linha; id: number; categor
   const unico = l.tipo === 'unica'
   return (
     <span className="flex w-full flex-col gap-2.5 rounded-[10px] bg-nevoa px-3 py-3">
-      <label className="flex flex-col gap-1 text-sm font-semibold">
+      <span className="flex flex-col gap-1 text-sm font-semibold">
         Categoria
-        <select
-          value={l.categoria ?? ''}
+        <SeletorCategoria
+          rotulo={`Categoria de ${l.titulo}`}
+          valor={l.categoria}
+          natureza={l.natureza}
+          categorias={categorias}
           disabled={salvando}
-          onChange={(e) =>
-            fazer(() => api(`/lancamentos/${id}/`, { method: 'PATCH', body: { categoria: e.target.value ? Number(e.target.value) : null } }))
-          }
-          className="min-h-10 rounded-lg border border-linha bg-white px-2 text-[15px] font-normal"
-        >
-          <option value="">Sem categoria</option>
-          {categorias.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.nome}
-            </option>
-          ))}
-        </select>
-      </label>
+          aoEscolher={(categoria) => fazer(() => api(`/lancamentos/${id}/`, { method: 'PATCH', body: { categoria } }))}
+          aoCriar={aoCriarCategoria}
+          envoltorio="flex w-full items-center gap-2"
+          className="min-h-10 w-full rounded-lg border border-linha bg-white px-2 text-[15px] font-normal"
+        />
+      </span>
       {unico && (
         <>
           <button
@@ -222,7 +254,7 @@ function NovoBotoes() {
       </Link>
       <Link
         to="/lancamentos/novo?natureza=receita"
-        className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-musgo px-3.5 text-[15px] font-bold text-white"
+        className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-credito px-3.5 text-[15px] font-bold text-white"
       >
         <Icon name="mais" size={18} strokeWidth={2} />
         Recebimento
@@ -257,13 +289,18 @@ export default function Lancamentos() {
       chave: `l${l.id}`,
       data: l.data,
       titulo: l.descricao,
-      detalhe: l.natureza === 'receita' ? cad.meio(l) : `${cad.categoria(l)}, ${cad.meio(l)}`,
+      detalhe: (
+        <>
+          <RotuloCategoria nome={cad.categoria(l)} cor={cad.cor(l.categoria)} />, {cad.meio(l)}
+        </>
+      ),
       valor: l.valor,
       natureza: l.natureza,
       pago: l.pago,
       tipo: l.tipo,
       lancamento: l.id,
       categoria: l.categoria,
+      origem: l.conta ? `c${l.conta}` : 'sem',
       parcela: l.parcela_total ? `parcela ${l.parcela_atual} de ${l.parcela_total}` : l.tipo === 'recorrente' ? 'todo mês' : undefined,
     }))
     for (const f of faturas.dados ?? []) {
@@ -278,15 +315,28 @@ export default function Lancamentos() {
         tipo: 'fatura',
         para: `/cartoes?cartao=${f.cartao}&fecha=${f.fecha}`,
         fatura: f,
+        origem: `k${f.cartao}`,
       })
     }
     return out.sort((a, b) => a.data.localeCompare(b.data) || a.titulo.localeCompare(b.titulo))
   }, [resposta.dados, faturas.dados, cad])
 
-  const visiveis = linhas.filter((l) => combina(l, filtro))
-  const entrou = linhas.filter((l) => l.natureza === 'receita').reduce((s, l) => s + Math.abs(l.valor), 0)
-  const saiu = linhas.filter((l) => l.natureza === 'despesa').reduce((s, l) => s + l.valor, 0)
-  const falta = linhas.filter((l) => l.natureza === 'despesa' && !l.pago).reduce((s, l) => s + l.valor, 0)
+  const [ocultos, setOcultosEstado] = useState<string[]>(lerOcultos)
+  const setOcultos = (v: string[]) => {
+    setOcultosEstado(v)
+    guardarOcultos(v)
+  }
+  const origens = [
+    ...cad.contas.map((c) => ({ id: `c${c.id}`, label: c.nome })),
+    ...cad.cartoes.map((c) => ({ id: `k${c.id}`, label: nomeCartao(c) })),
+    ...(linhas.some((l) => l.origem === 'sem') ? [{ id: 'sem', label: 'Sem conta' }] : []),
+  ]
+  // Os totais também seguem as contas escolhidas.
+  const doBanco = linhas.filter((l) => !ocultos.includes(l.origem))
+  const visiveis = doBanco.filter((l) => combina(l, filtro))
+  const entrou = doBanco.filter((l) => l.natureza === 'receita').reduce((s, l) => s + Math.abs(l.valor), 0)
+  const saiu = doBanco.filter((l) => l.natureza === 'despesa').reduce((s, l) => s + l.valor, 0)
+  const falta = doBanco.filter((l) => l.natureza === 'despesa' && !l.pago).reduce((s, l) => s + l.valor, 0)
   const carregando = (resposta.carregando && !resposta.dados) || (faturas.carregando && !faturas.dados)
   const erro = resposta.erro || faturas.erro
   const recarregar = () => {
@@ -324,11 +374,11 @@ export default function Lancamentos() {
       <p className="flex flex-wrap gap-x-7 gap-y-2">
         <span className="flex flex-col">
           <span className="text-sm text-suave">Entrou</span>
-          <span className="font-display text-[22px] font-bold text-musgo tabular-nums">{moeda(entrou)}</span>
+          <span className="font-display text-[22px] font-bold text-credito tabular-nums">{moeda(entrou)}</span>
         </span>
         <span className="flex flex-col">
           <span className="text-sm text-suave">Saiu</span>
-          <span className="font-display text-[22px] font-bold tabular-nums">{moeda(saiu)}</span>
+          <span className="font-display text-[22px] font-bold text-debito tabular-nums">{moeda(saiu)}</span>
         </span>
         <span className="flex flex-col">
           <span className="text-sm text-suave">Falta pagar</span>
@@ -349,14 +399,23 @@ export default function Lancamentos() {
             {f.label}
           </button>
         ))}
+        <Link
+          to="/categorias"
+          className="flex min-h-[38px] items-center gap-1.5 rounded-[10px] border border-dashed border-borda px-3.5 text-[15px] font-semibold text-suave hover:bg-nevoa"
+        >
+          <Icon name="etiqueta" size={16} />
+          Categorias
+        </Link>
       </div>
+
+      {origens.length > 1 && <EscolherOrigens origens={origens} ocultos={ocultos} onChange={setOcultos} />}
 
       <div className="flex flex-col pt-2">
         {erro && <p className="py-10 text-center text-suave">Não foi possível carregar. {erro}</p>}
         {carregando && <p className="py-10 text-center text-suave">Carregando…</p>}
         {!carregando && !erro && visiveis.length === 0 && (
           <p className="py-10 text-center text-suave">
-            {linhas.length === 0 ? 'Nenhum lançamento neste mês.' : 'Nenhum lançamento com esse filtro neste mês.'}
+            {linhas.length === 0 ? 'Nenhum lançamento neste mês.' : 'Nenhum lançamento com esses filtros neste mês.'}
           </p>
         )}
         {visiveis.map((l) => (
@@ -368,13 +427,72 @@ export default function Lancamentos() {
             situacao={situacao(l, hoje)}
             alerta={!l.pago && l.natureza === 'despesa'}
             valor={l.natureza === 'receita' ? `+ ${moeda(Math.abs(l.valor))}` : moeda(l.valor)}
-            valorClasse={l.natureza === 'receita' ? 'text-musgo' : ''}
+            valorClasse={l.natureza === 'receita' ? 'text-credito' : 'text-debito'}
             extra={l.parcela && <span className="text-sm text-suave">{l.parcela}</span>}
             para={l.para}
-            acao={acaoDa(l, hoje, recarregar, cad.categorias)}
+            acao={acaoDa(l, hoje, recarregar, cad.categorias, cad.recarregarCategorias)}
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+/** Quais contas e cartões entram na lista. Começa com todos; toque para esconder ou mostrar cada um. */
+function EscolherOrigens({
+  origens,
+  ocultos,
+  onChange,
+}: {
+  origens: { id: string; label: string }[]
+  ocultos: string[]
+  onChange: (v: string[]) => void
+}) {
+  const [aberto, setAberto] = useState(false)
+  const escondidos = origens.filter((o) => ocultos.includes(o.id)).length
+  const resumo = escondidos === 0 ? 'Todas' : `${origens.length - escondidos} de ${origens.length}`
+  const alternar = (id: string) => {
+    const novo = ocultos.includes(id) ? ocultos.filter((x) => x !== id) : [...ocultos, id]
+    // Esconder tudo deixaria a lista vazia sem motivo aparente: volta a mostrar todas.
+    onChange(origens.every((o) => novo.includes(o.id)) ? [] : novo)
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={aberto}
+        onClick={() => setAberto(!aberto)}
+        className="flex min-h-11 cursor-pointer items-center gap-2 self-start text-[15px] font-semibold"
+      >
+        <Icon name="banco" size={18} />
+        Contas e cartões: <span className={escondidos ? 'font-bold text-tinta' : 'text-suave'}>{resumo}</span>
+        <Icon name={aberto ? 'fechar' : 'direita'} size={16} strokeWidth={2} />
+      </button>
+      {aberto && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Contas e cartões mostrados">
+          {origens.map((o) => {
+            const ativo = !ocultos.includes(o.id)
+            return (
+              <button
+                key={o.id}
+                type="button"
+                aria-pressed={ativo}
+                onClick={() => alternar(o.id)}
+                className={`min-h-[38px] cursor-pointer rounded-[10px] border px-3.5 text-[15px] ${
+                  ativo ? 'border-tinta bg-nevoa font-bold text-tinta' : 'border-borda bg-white font-semibold text-suave line-through'
+                }`}
+              >
+                {o.label}
+              </button>
+            )
+          })}
+          {escondidos > 0 && (
+            <button type="button" onClick={() => onChange([])} className="min-h-[38px] cursor-pointer px-2 text-[15px] font-bold text-tinta underline underline-offset-2">
+              Mostrar todas
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

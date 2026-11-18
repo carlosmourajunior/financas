@@ -6,7 +6,7 @@ import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Titulo } from '../components/ui'
 import { api, type Pagina } from '../lib/api'
-import { useCadastros } from '../lib/cadastros'
+import { nomeCartao, useCadastros } from '../lib/cadastros'
 import { MESES, isoData, isoMes, lerData, maiuscula, porExtenso } from '../lib/datas'
 import { moeda } from '../lib/format'
 import { desfazerPagamentoFatura, excluirLancamento, marcarLancamento, pagarFatura } from '../lib/pagar'
@@ -39,6 +39,28 @@ interface Linha {
   lancamento?: number
   categoria?: number | null
   fatura?: FaturaDoMes
+  /** De onde vem: `c<id>` conta, `k<id>` cartão, `sem` sem conta. */
+  origem: string
+}
+
+// Contas e cartões escondidos da lista. Guarda os escondidos, então uma conta nova já aparece.
+const CHAVE_OCULTOS = 'financas.lancamentos.ocultos'
+
+function lerOcultos(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(CHAVE_OCULTOS) ?? '[]')
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function guardarOcultos(v: string[]) {
+  try {
+    localStorage.setItem(CHAVE_OCULTOS, JSON.stringify(v))
+  } catch {
+    // sem armazenamento, vale só nesta visita
+  }
 }
 
 function situacao(l: Linha, hoje: string) {
@@ -277,6 +299,7 @@ export default function Lancamentos() {
       tipo: l.tipo,
       lancamento: l.id,
       categoria: l.categoria,
+      origem: l.conta ? `c${l.conta}` : 'sem',
       parcela: l.parcela_total ? `parcela ${l.parcela_atual} de ${l.parcela_total}` : l.tipo === 'recorrente' ? 'todo mês' : undefined,
     }))
     for (const f of faturas.dados ?? []) {
@@ -291,15 +314,28 @@ export default function Lancamentos() {
         tipo: 'fatura',
         para: `/cartoes?cartao=${f.cartao}&fecha=${f.fecha}`,
         fatura: f,
+        origem: `k${f.cartao}`,
       })
     }
     return out.sort((a, b) => a.data.localeCompare(b.data) || a.titulo.localeCompare(b.titulo))
   }, [resposta.dados, faturas.dados, cad])
 
-  const visiveis = linhas.filter((l) => combina(l, filtro))
-  const entrou = linhas.filter((l) => l.natureza === 'receita').reduce((s, l) => s + Math.abs(l.valor), 0)
-  const saiu = linhas.filter((l) => l.natureza === 'despesa').reduce((s, l) => s + l.valor, 0)
-  const falta = linhas.filter((l) => l.natureza === 'despesa' && !l.pago).reduce((s, l) => s + l.valor, 0)
+  const [ocultos, setOcultosEstado] = useState<string[]>(lerOcultos)
+  const setOcultos = (v: string[]) => {
+    setOcultosEstado(v)
+    guardarOcultos(v)
+  }
+  const origens = [
+    ...cad.contas.map((c) => ({ id: `c${c.id}`, label: c.nome })),
+    ...cad.cartoes.map((c) => ({ id: `k${c.id}`, label: nomeCartao(c) })),
+    ...(linhas.some((l) => l.origem === 'sem') ? [{ id: 'sem', label: 'Sem conta' }] : []),
+  ]
+  // Os totais também seguem as contas escolhidas.
+  const doBanco = linhas.filter((l) => !ocultos.includes(l.origem))
+  const visiveis = doBanco.filter((l) => combina(l, filtro))
+  const entrou = doBanco.filter((l) => l.natureza === 'receita').reduce((s, l) => s + Math.abs(l.valor), 0)
+  const saiu = doBanco.filter((l) => l.natureza === 'despesa').reduce((s, l) => s + l.valor, 0)
+  const falta = doBanco.filter((l) => l.natureza === 'despesa' && !l.pago).reduce((s, l) => s + l.valor, 0)
   const carregando = (resposta.carregando && !resposta.dados) || (faturas.carregando && !faturas.dados)
   const erro = resposta.erro || faturas.erro
   const recarregar = () => {
@@ -371,12 +407,14 @@ export default function Lancamentos() {
         </Link>
       </div>
 
+      {origens.length > 1 && <EscolherOrigens origens={origens} ocultos={ocultos} onChange={setOcultos} />}
+
       <div className="flex flex-col pt-2">
         {erro && <p className="py-10 text-center text-suave">Não foi possível carregar. {erro}</p>}
         {carregando && <p className="py-10 text-center text-suave">Carregando…</p>}
         {!carregando && !erro && visiveis.length === 0 && (
           <p className="py-10 text-center text-suave">
-            {linhas.length === 0 ? 'Nenhum lançamento neste mês.' : 'Nenhum lançamento com esse filtro neste mês.'}
+            {linhas.length === 0 ? 'Nenhum lançamento neste mês.' : 'Nenhum lançamento com esses filtros neste mês.'}
           </p>
         )}
         {visiveis.map((l) => (
@@ -395,6 +433,65 @@ export default function Lancamentos() {
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+/** Quais contas e cartões entram na lista. Começa com todos; toque para esconder ou mostrar cada um. */
+function EscolherOrigens({
+  origens,
+  ocultos,
+  onChange,
+}: {
+  origens: { id: string; label: string }[]
+  ocultos: string[]
+  onChange: (v: string[]) => void
+}) {
+  const [aberto, setAberto] = useState(false)
+  const escondidos = origens.filter((o) => ocultos.includes(o.id)).length
+  const resumo = escondidos === 0 ? 'Todas' : `${origens.length - escondidos} de ${origens.length}`
+  const alternar = (id: string) => {
+    const novo = ocultos.includes(id) ? ocultos.filter((x) => x !== id) : [...ocultos, id]
+    // Esconder tudo deixaria a lista vazia sem motivo aparente: volta a mostrar todas.
+    onChange(origens.every((o) => novo.includes(o.id)) ? [] : novo)
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={aberto}
+        onClick={() => setAberto(!aberto)}
+        className="flex min-h-11 cursor-pointer items-center gap-2 self-start text-[15px] font-semibold"
+      >
+        <Icon name="banco" size={18} />
+        Contas e cartões: <span className={escondidos ? 'font-bold text-tinta' : 'text-suave'}>{resumo}</span>
+        <Icon name={aberto ? 'fechar' : 'direita'} size={16} strokeWidth={2} />
+      </button>
+      {aberto && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Contas e cartões mostrados">
+          {origens.map((o) => {
+            const ativo = !ocultos.includes(o.id)
+            return (
+              <button
+                key={o.id}
+                type="button"
+                aria-pressed={ativo}
+                onClick={() => alternar(o.id)}
+                className={`min-h-[38px] cursor-pointer rounded-[10px] border px-3.5 text-[15px] ${
+                  ativo ? 'border-tinta bg-nevoa font-bold text-tinta' : 'border-borda bg-white font-semibold text-suave line-through'
+                }`}
+              >
+                {o.label}
+              </button>
+            )
+          })}
+          {escondidos > 0 && (
+            <button type="button" onClick={() => onChange([])} className="min-h-[38px] cursor-pointer px-2 text-[15px] font-bold text-tinta underline underline-offset-2">
+              Mostrar todas
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

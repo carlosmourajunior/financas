@@ -535,3 +535,37 @@ class CartaoDesativadoFaturasTests(APITestCase):
         depois = len(self.client.get(f"/api/faturas/?mes={mes}").json()) + len(self.client.get(f"/api/faturas/?mes={proximo}").json())
         self.assertEqual(depois, 0)
         self.assertEqual(self.client.get("/api/resumo/").status_code, 200)
+
+
+class CategoriaTests(ApiBase):
+    def test_cria_categoria_com_cor_escolhida(self):
+        r = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa", "cor": "#2b7a9b"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["cor"], "#2B7A9B")
+
+    def test_sem_cor_ganha_uma_da_paleta(self):
+        r = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertRegex(r.data["cor"], r"^#[0-9A-F]{6}$")
+
+    def test_cor_invalida_e_nome_repetido(self):
+        r = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa", "cor": "azul"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("cor", r.data)
+        self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json")
+        r = self.client.post("/api/categorias/", {"nome": " pets ", "natureza": "despesa"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("nome", r.data)
+
+    def test_muda_cor_e_resumo_traz_a_cor(self):
+        c = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json").data
+        self.client.patch(f"/api/categorias/{c['id']}/", {"cor": "#D14D72"}, format="json")
+        self.lancar(descricao="Ração", valor=9_000, conta=self.conta.id, categoria=c["id"])
+        r = resumo(self.usuario, date.today())
+        self.assertIn({"id": c["id"], "nome": "Pets", "cor": "#D14D72", "valor": 9_000}, r["categorias"])
+
+    def test_excluir_categoria_deixa_lancamento_sem_categoria(self):
+        c = self.client.post("/api/categorias/", {"nome": "Pets", "natureza": "despesa"}, format="json").data
+        lanc = self.lancar(descricao="Ração", conta=self.conta.id, categoria=c["id"]).data
+        self.assertEqual(self.client.delete(f"/api/categorias/{c['id']}/").status_code, 204)
+        self.assertIsNone(Lancamento.objects.get(pk=lanc["id"]).categoria_id)

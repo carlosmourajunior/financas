@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { RotuloCategoria } from '../components/Categorias'
 import { Erro, FormConta } from '../components/Formularios'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
@@ -176,9 +177,9 @@ function NavegarMes({ inicio, irMes }: { inicio: string; irMes: (m: string) => v
 function NumerosMes({ m }: { m: NumerosDoMes }) {
   return (
     <div className="grid grid-cols-2 gap-x-4 border-y border-linha py-3 sm:grid-cols-4">
-      <Numero rotulo="Entrou" valor={moeda(m.entrou)} classe="text-musgo" />
-      <Numero rotulo="Saiu" valor={moeda(m.saiu)} />
-      <Numero rotulo="A receber" valor={moeda(m.a_receber)} classe={m.a_receber ? 'text-musgo' : 'text-suave'} />
+      <Numero rotulo="Entrou" valor={moeda(m.entrou)} classe="text-credito" />
+      <Numero rotulo="Saiu" valor={moeda(m.saiu)} classe="text-debito" />
+      <Numero rotulo="A receber" valor={moeda(m.a_receber)} classe={m.a_receber ? 'text-credito' : 'text-suave'} />
       <Numero rotulo="A pagar" valor={moeda(m.a_pagar)} classe={m.a_pagar ? 'text-ambar-texto' : 'text-suave'} />
     </div>
   )
@@ -199,17 +200,25 @@ function Movimentos({ itens, mostrarConta = false }: { itens: MovimentoEmConta[]
     <>
       {itens.map((l) => {
         const receita = l.natureza === 'receita'
-        const detalhe = [mostrarConta && l.conta_nome, l.categoria ?? (receita ? null : 'Sem categoria')].filter(Boolean).join(', ')
+        const nomeCategoria = l.categoria ?? (receita ? null : 'Sem categoria')
+        const detalhe =
+          mostrarConta || nomeCategoria ? (
+            <>
+              {mostrarConta && l.conta_nome}
+              {mostrarConta && l.conta_nome && nomeCategoria && ', '}
+              {nomeCategoria && <RotuloCategoria nome={nomeCategoria} cor={l.categoria_cor} />}
+            </>
+          ) : undefined
         return (
           <LinhaComData
             key={l.id}
             data={l.data}
             titulo={l.descricao}
-            detalhe={detalhe || undefined}
+            detalhe={detalhe}
             situacao={l.pago ? undefined : receita ? 'A receber' : 'A pagar'}
             alerta={!l.pago && !receita}
             valor={`${receita ? '+' : '-'} ${moeda(l.valor)}`}
-            valorClasse={receita ? 'text-musgo' : ''}
+            valorClasse={receita ? 'text-credito' : 'text-debito'}
             extra={l.parcela_total && <span className="text-sm text-suave">parcela {l.parcela_atual} de {l.parcela_total}</span>}
           />
         )
@@ -222,7 +231,7 @@ function Destaque({ rotulo, valor, children }: { rotulo: string; valor: number; 
   return (
     <div className="flex flex-col gap-2">
       <span className="text-[15px] font-semibold text-suave">{rotulo}</span>
-      <p className={`font-display text-[44px] font-extrabold leading-none tracking-tight tabular-nums ${valor < 0 ? 'text-ambar-texto' : ''}`}>
+      <p className={`font-display text-[44px] font-extrabold leading-none tracking-tight tabular-nums ${valor < 0 ? 'text-debito' : ''}`}>
         {valor < 0 ? `- ${moeda(valor)}` : moeda(valor)}
       </p>
       {children}
@@ -258,7 +267,7 @@ function Todas({
           {d.cartoes.length > 0 && (
             <p className="text-[15px] text-suave">
               Depois das faturas a pagar ({moeda(d.faturas_a_pagar)}) ficam{' '}
-              <strong className={d.depois_das_faturas < 0 ? 'text-ambar-texto' : 'text-tinta'}>
+              <strong className={d.depois_das_faturas < 0 ? 'text-debito' : 'text-tinta'}>
                 {d.depois_das_faturas < 0 ? `- ${moeda(d.depois_das_faturas)}` : moeda(d.depois_das_faturas)}
               </strong>
             </p>
@@ -283,7 +292,7 @@ function Todas({
                 {c.pluggy && ', conectada ao banco'}
               </span>
             </span>
-            <span className={`whitespace-nowrap text-base font-bold tabular-nums ${c.saldo < 0 ? 'text-ambar-texto' : ''}`}>
+            <span className={`whitespace-nowrap text-base font-bold tabular-nums ${c.saldo < 0 ? 'text-debito' : ''}`}>
               {c.saldo < 0 ? `- ${moeda(c.saldo)}` : moeda(c.saldo)}
             </span>
             <span className="text-suave">
@@ -372,7 +381,7 @@ function UmaConta({ id, mes, irMes, aoMudar }: { id: number; mes: string | null;
         <Destaque rotulo={`${TIPOS[d.conta.tipo]}${d.conta.pluggy ? ', conectada ao banco' : ''}`} valor={d.saldo}>
           <p className="text-[15px] text-suave">
             Previsto para {fimDoMes}:{' '}
-            <strong className={d.previsto < 0 ? 'text-ambar-texto' : 'text-tinta'}>{d.previsto < 0 ? `- ${moeda(d.previsto)}` : moeda(d.previsto)}</strong>
+            <strong className={d.previsto < 0 ? 'text-debito' : 'text-tinta'}>{d.previsto < 0 ? `- ${moeda(d.previsto)}` : moeda(d.previsto)}</strong>
           </p>
         </Destaque>
         <div className="flex gap-2.5 pt-1">

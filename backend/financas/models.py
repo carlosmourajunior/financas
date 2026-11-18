@@ -60,9 +60,18 @@ class Cartao(DoUsuario):
         return f"{self.nome} {self.final}".strip()
 
 
+# Cores que a tela oferece, legíveis sobre fundo branco. As padrão já nascem com uma delas.
+PALETA_CATEGORIAS = [
+    "#8C5A3C", "#E07A1F", "#2B7A9B", "#D14D72", "#3E9B5F", "#5A67D8", "#B8578B",
+    "#4A5568", "#C9A227", "#2A9D8F", "#1E6FB8", "#4C9F38", "#B5651D", "#7A8C2E", "#8A9A97",
+]
+COR_SEM_CATEGORIA = "#8A9A97"
+
+
 class Categoria(DoUsuario):
     nome = models.CharField(max_length=60)
     natureza = models.CharField(max_length=10, choices=Natureza.choices, default=Natureza.DESPESA)
+    cor = models.CharField(max_length=7, default=COR_SEM_CATEGORIA)
 
     class Meta:
         ordering = ["nome"]
@@ -77,10 +86,35 @@ CATEGORIAS_PADRAO = {
     Natureza.RECEITA: ["Salário", "Freelance", "Rendimentos", "Outras receitas"],
 }
 
+CORES_PADRAO = {
+    "Moradia": "#8C5A3C",
+    "Alimentação": "#E07A1F",
+    "Transporte": "#2B7A9B",
+    "Saúde": "#D14D72",
+    "Lazer": "#3E9B5F",
+    "Educação": "#5A67D8",
+    "Vestuário": "#B8578B",
+    "Eletrônicos": "#4A5568",
+    "Taxas": "#C9A227",
+    "Outros": "#8A9A97",
+    "Salário": "#1E6FB8",
+    "Freelance": "#2A9D8F",
+    "Rendimentos": "#4C9F38",
+    "Outras receitas": "#7A8C2E",
+}
+
+
+def cor_padrao(nome, posicao=0):
+    return CORES_PADRAO.get(nome) or PALETA_CATEGORIAS[posicao % len(PALETA_CATEGORIAS)]
+
 
 def criar_categorias_padrao(usuario):
     Categoria.objects.bulk_create(
-        [Categoria(dono=usuario, nome=nome, natureza=natureza) for natureza, nomes in CATEGORIAS_PADRAO.items() for nome in nomes],
+        [
+            Categoria(dono=usuario, nome=nome, natureza=natureza, cor=cor_padrao(nome))
+            for natureza, nomes in CATEGORIAS_PADRAO.items()
+            for nome in nomes
+        ],
         ignore_conflicts=True,
     )
 

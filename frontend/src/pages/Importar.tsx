@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { SeletorCategoria } from '../components/Categorias'
 import { Erro } from '../components/Formularios'
 import ImportarExtrato from './ImportarExtrato'
 import { BuscarFatura, EscolherOrigem, ImportarRecentes } from '../components/OpenFinance'
@@ -35,7 +36,6 @@ export default function Importar() {
   const cartaoEscolhido = cartao || (cad.cartoes[0] ? String(cad.cartoes[0].id) : '')
   const marcados = itens.filter((i) => i.importar)
   const somaMarcados = marcados.reduce((s, i) => s + (i.natureza === 'despesa' ? i.valor : -i.valor), 0)
-  const despesas = cad.categorias.filter((c) => c.natureza === 'despesa')
 
   async function ler(e: ChangeEvent<HTMLInputElement>) {
     const arquivo = e.target.files?.[0]
@@ -178,19 +178,15 @@ export default function Importar() {
                     {l.natureza === 'despesa' && (
                       <>
                         ,
-                        <select
-                          aria-label={`Categoria de ${l.descricao}`}
-                          value={l.categoria ?? ''}
-                          onChange={(e) => mudar(n, { categoria: e.target.value ? Number(e.target.value) : null })}
+                        <SeletorCategoria
+                          rotulo={`Categoria de ${l.descricao}`}
+                          valor={l.categoria}
+                          natureza="despesa"
+                          categorias={cad.categorias}
+                          aoEscolher={(categoria) => mudar(n, { categoria })}
+                          aoCriar={cad.recarregarCategorias}
                           className="-my-1 min-h-8 cursor-pointer rounded-md bg-transparent py-1 text-sm text-suave hover:bg-nevoa"
-                        >
-                          <option value="">Sem categoria</option>
-                          {despesas.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.nome}
-                            </option>
-                          ))}
-                        </select>
+                        />
                       </>
                     )}
                     {l.natureza === 'receita' && ', crédito na fatura'}
@@ -206,7 +202,7 @@ export default function Importar() {
                     <span className="text-sm text-suave">O banco cobrou nesta fatura o que ficou da anterior</span>
                   )}
                 </span>
-                <span className={`text-base font-bold tabular-nums ${l.natureza === 'receita' ? 'text-musgo' : ''}`}>
+                <span className={`text-base font-bold tabular-nums ${l.natureza === 'receita' ? 'text-credito' : 'text-debito'}`}>
                   {l.natureza === 'receita' ? `- ${moeda(l.valor)}` : moeda(l.valor)}
                 </span>
               </div>

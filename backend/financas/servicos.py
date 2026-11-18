@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from django.db import transaction
 from django.db.models import Q, Sum
 
-from .models import Cartao, Conta, Emprestimo, Frequencia, Lancamento, Natureza, PagamentoFatura, Recorrencia
+from .models import COR_SEM_CATEGORIA, Cartao, Conta, Emprestimo, Frequencia, Lancamento, Natureza, PagamentoFatura, Recorrencia
 
 
 def somar_meses(d: date, meses: int, dia: int | None = None) -> date:
@@ -423,7 +423,7 @@ def resumo(dono, hoje: date) -> dict:
     creditos = _soma(lanc.filter(no_mes, natureza=Natureza.RECEITA, cartao__isnull=False))
     categorias = (
         gastos
-        .values("categoria__nome")
+        .values("categoria", "categoria__nome", "categoria__cor")
         .annotate(valor=Sum("valor"))
         .order_by("-valor")
     )
@@ -490,7 +490,10 @@ def resumo(dono, hoje: date) -> dict:
         "parcelas_anteriores": _soma(gastos.filter(parcela_atual__gt=1)),
         # Estornos e créditos nas faturas do mês: abatem o gasto, fora das categorias.
         "creditos_cartao": creditos,
-        "categorias": [{"nome": c["categoria__nome"] or "Sem categoria", "valor": c["valor"]} for c in categorias],
+        "categorias": [
+            {"id": c["categoria"], "nome": c["categoria__nome"] or "Sem categoria", "cor": c["categoria__cor"] or COR_SEM_CATEGORIA, "valor": c["valor"]}
+            for c in categorias
+        ],
         "faturas": faturas,
         "compromisso_proximo_mes": compromisso,
         "entradas_proximo_mes": entradas_previstas,
@@ -517,6 +520,7 @@ def _movimento(l: Lancamento) -> dict:
         "pago": l.pago,
         "tipo": l.tipo,
         "categoria": l.categoria.nome if l.categoria else None,
+        "categoria_cor": l.categoria.cor if l.categoria else None,
         "conta": l.conta_id,
         "conta_nome": l.conta.nome if l.conta else None,
         "parcela_atual": l.parcela_atual,

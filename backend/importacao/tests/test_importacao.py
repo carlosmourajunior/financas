@@ -268,3 +268,18 @@ class FaturaAbertaMantemParcelasTests(TestCase):
         no_ciclo = Lancamento.objects.filter(cartao=cartao, data__gte=aberta.abre, data__lte=aberta.fecha)
         self.assertEqual(sorted(no_ciclo.values_list("descricao", "valor")), [("Geladeira", 50_000), ("Mercado", 20_000)])
         self.assertEqual(fatura_que_fecha_em(cartao, aberta.fecha).total, 70_000)
+
+    def test_mesma_compra_escrita_diferente_nao_duplica_parcela(self):
+        from financas.servicos import fatura_aberta, somar_meses
+
+        u = get_user_model().objects.create_user(email="q@exemplo.com", password="senha-forte-123")
+        cartao = Cartao.objects.create(dono=u, nome="Mercado Pago", limite=1_000_000, dia_fechamento=5, dia_vencimento=10)
+        aberta = fatura_aberta(cartao, date.today())
+        anterior = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, 5))
+        # A fatura fechada projeta a 8/12 na aberta com a descrição daquele mês...
+        confirmar(cartao, anterior.fecha, [{"data": anterior.fecha, "descricao": "NR *NR ACAMP", "valor": 26_683, "natureza": "despesa", "parcela_atual": 7, "parcela_total": 12}])
+        # ...e o banco manda a 8/12 com outra descrição e centavos diferentes.
+        confirmar(cartao, aberta.fecha, [{"data": aberta.fecha, "descricao": "NR *NR ACAMPAM", "valor": 26_685, "natureza": "despesa", "parcela_atual": 8, "parcela_total": 12}])
+        no_ciclo = Lancamento.objects.filter(cartao=cartao, data__gte=aberta.abre, data__lte=aberta.fecha)
+        self.assertEqual(list(no_ciclo.values_list("descricao", "valor")), [("NR *NR ACAMPAM", 26_685)])
+        self.assertEqual(Lancamento.objects.filter(cartao=cartao, parcela_atual=12).count(), 1)

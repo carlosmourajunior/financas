@@ -428,8 +428,13 @@ class ParcelasNaFaturaAbertaTests(APITestCase):
             tx("n1", "2026-11-20", "Mercado", 50, creditCardMetadata={}),
             tx("n0", "2026-10-05", "Já na fatura", 10, creditCardMetadata={"billId": "fat-out"}),
         ]
+        transacoes.append(tx("n2", "2026-09-30", "Compra antes do ciclo", 20, creditCardMetadata={}))
+        transacoes.append(tx("e1", "2026-11-21", "Estorno", -6.5, tipo="CREDIT", creditCardMetadata={}))
         lida = conversao.fatura_aberta("Nubank", "", {"fat-out"}, date(2026, 10, 9), date(2026, 12, 8), date(2026, 12, 15), transacoes)
-        self.assertEqual(sorted((i.descricao, i.parcela_atual) for i in lida.itens), [("Mercado", None), ("TV", 4)])
+        self.assertEqual(
+            sorted((i.descricao, i.parcela_atual, i.valor) for i in lida.itens),
+            [("Compra antes do ciclo", None, 2_000), ("Estorno", None, -650), ("Mercado", None, 5_000), ("TV", 4, 10_000)],
+        )
 
 
 class TotalDoBancoTests(APITestCase):
@@ -441,3 +446,9 @@ class TotalDoBancoTests(APITestCase):
         self.assertEqual(lida.itens[-1].valor, 5_000)
         self.assertIn("Juros", lida.itens[-1].descricao)
         self.assertTrue(lida.conferida)
+
+    def test_aberta_preve_o_encargo_da_fatura_passada(self):
+        fatura = {"id": "f", "dueDate": "2026-10-15T00:00:00Z", "billClosingDate": "2026-10-08T00:00:00Z", "totalAmount": 500.9}
+        transacoes = [{**t, "creditCardMetadata": {**t["creditCardMetadata"], "billId": "f"}} for t in TRANSACOES_CARTAO[:3]]
+        lida = conversao.fatura_aberta("Nubank", "", {"f"}, date(2026, 10, 9), date(2026, 11, 8), date(2026, 11, 15), transacoes, [fatura])
+        self.assertEqual([(i.descricao[:8], i.valor) for i in lida.itens], [("Previsto", 5_000)])

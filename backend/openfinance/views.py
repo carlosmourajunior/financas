@@ -13,10 +13,11 @@ from rest_framework.exceptions import APIException, PermissionDenied, Validation
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from financas.models import Cartao, Conta
-from financas.servicos import fatura_aberta
-from importacao.extrato import previa_extrato
-from importacao.servicos import previa
+from financas.models import Cartao, Categoria, Conta, Emprestimo, Lancamento, Natureza, PagamentoFatura
+from financas.servicos import fatura_aberta, fatura_que_fecha_em, fechamento_de
+from importacao.extrato import Classe, confirmar_extrato, previa_extrato
+from importacao.leitores.base import normalizar
+from importacao.servicos import confirmar, previa
 from importacao.views import cartao_do_usuario, conta_do_usuario
 
 from . import conversao, pluggy
@@ -285,3 +286,118 @@ class TrazerContasView(APIView):
     def post(self, request):
         _exigir_liberado(request)
         return Response(trazer_contas(request.user))
+
+
+_PAGA_FATURA = re.compile(r"\b(pagamento de fatura|pagamento fatura|pgto fatura|pag fat|fatura do cartao|fatura cartao|cartao de credito)\b")
+
+
+def _saldo_que_conta(conta: Conta) -> int:
+    """O que os lançamentos pagos da conta e as faturas pagas somam no saldo do Início."""
+    from django.db.models import Sum
+
+    lanc = Lancamento.objects.filter(conta=conta, pago=True)
+    entra = lanc.filter(natureza=Natureza.RECEITA).aggregate(s=Sum("valor"))["s"] or 0
+    sai = lanc.filter(natureza=Natureza.DESPESA).aggregate(s=Sum("valor"))["s"] or 0
+    faturas = PagamentoFatura.objects.filter(dono=conta.dono).aggregate(s=Sum("valor"))["s"] or 0
+    return entra - sai - faturas
+
+
+def _instancias(item: dict, dono) -> dict:
+    """A prévia devolve ids; a gravação do extrato espera os objetos (como o serializer entrega)."""
+    modelos = {"categoria": Categoria, "cartao": Cartao, "emprestimo": Emprestimo, "lancamento": Lancamento}
+    for campo, modelo in modelos.items():
+        if item.get(campo):
+            item[campo] = modelo.objects.filter(dono=dono, pk=item[campo]).first()
+    return item
+
+
+def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
+    """Importa de uma vez, sem a revisão linha a linha, o que veio do banco nos últimos `dias`.
+
+    Usa a mesma prévia da importação manual: o que ela marcaria como repetido ou já importado
+    fica de fora. Cartões: as faturas que venceram no período e a aberta. Contas: o extrato do
+    período, com o saldo inicial recalculado para o saldo de hoje continuar igual ao do banco.
+    """
+    hoje = date.today()
+    desde = hoje - timedelta(days=dias)
+    feito = {"lancamentos_cartao": 0, "faturas": 0, "movimentos": 0, "pulados": []}
+    por_id = {c.id: c for c in _chamar(pluggy.contas)}
+
+    for v in Vinculo.objects.filter(dono=dono, cartao__isnull=False).select_related("cartao"):
+        c, cartao = por_id.get(v.pluggy_conta), v.cartao
+        if not c:
+            continue
+        if v.conferir_datas:
+            # Sem fechamento e vencimento certos, as compras cairiam na fatura errada.
+            feito["pulados"].append(f"{cartao}: confira os dias de fechamento e vencimento")
+            continue
+        fechadas = _chamar(pluggy.faturas, c.id)
+        no_periodo = [b for b in fechadas if b.get("dueDate") and date.fromisoformat(b["dueDate"][:10]) >= desde]
+        aberta = fatura_aberta(cartao, hoje)
+        transacoes = _chamar(pluggy.transacoes, c.id, desde - timedelta(days=45), aberta.fecha)
+        final = pluggy.final_do_cartao(c.numero)
+        lidas = [conversao.fatura_fechada(cartao.nome, final, fechadas, b, transacoes) for b in no_periodo]
+        # O que a Pluggy ainda não pôs em fatura fechada: a aberta e, se a última fechou há pouco,
+        # a que fechou no app mas o banco ainda não listou. Cada uma no seu ciclo.
+        ids = {b["id"] for b in fechadas}
+        soltas = [t for t in transacoes if (t.get("creditCardMetadata") or {}).get("billId") not in ids]
+        ciclos = sorted({fechamento_de(cartao, max(conversao._data(t), desde)) for t in soltas} | {aberta.fecha})
+        for fecha in ciclos:
+            f = fatura_que_fecha_em(cartao, fecha)
+            lidas.append(conversao.fatura_aberta(cartao.nome, final, ids, f.abre, f.fecha, f.vence, transacoes))
+        for lida in lidas:
+            if not lida.itens:
+                continue
+            p = previa(cartao, lida)
+            itens = [i for i in p["itens"] if i["importar"]]
+            if itens:
+                r = confirmar(cartao, p["ciclo"]["fecha"], itens)
+                feito["lancamentos_cartao"] += r["criados"]
+                feito["faturas"] += 1
+
+    cartoes_ligados = list(Vinculo.objects.filter(dono=dono, cartao__isnull=False).select_related("cartao"))
+    filtro = {} if poupancas else {"conta__tipo__in": [Conta.Tipo.CORRENTE, Conta.Tipo.DINHEIRO]}
+    for v in Vinculo.objects.filter(dono=dono, conta__isnull=False, **filtro).select_related("conta"):
+        c, conta = por_id.get(v.pluggy_conta), v.conta
+        if not c:
+            continue
+        lido = conversao.extrato(conta.nome, _chamar(pluggy.transacoes, c.id, desde, hoje))
+        if not lido.itens:
+            continue
+        p = previa_extrato(conta, lido)
+        # Cartões do mesmo banco: o pagamento da fatura que a prévia não reconheceu pelo nome.
+        do_banco = [x.cartao for x in cartoes_ligados if por_id.get(x.pluggy_conta) and por_id[x.pluggy_conta].item == c.item]
+        itens = []
+        for i in p["itens"]:
+            if not i["importar"] or i["classe"] == Classe.TRANSFERENCIA:
+                continue
+            if i["classe"] == Classe.DESPESA and _PAGA_FATURA.search(normalizar(f"{i['origem']} {i['descricao']}")):
+                if len(do_banco) != 1:
+                    # Sem saber de qual cartão, lançar como conta contaria a compra duas vezes.
+                    feito["pulados"].append(f"{conta.nome}: pagamento de fatura de {i['data']:%d/%m} ({i['valor'] / 100:.2f}), importe pela revisão")
+                    continue
+                i = {**i, "classe": Classe.FATURA, "cartao": do_banco[0].id, "categoria": None}
+            itens.append(_instancias(dict(i), dono))
+        if not itens:
+            continue
+        with transaction.atomic():
+            antes = _saldo_que_conta(conta)
+            r = confirmar_extrato(conta, itens)
+            # O saldo de hoje é o do banco: o histórico trazido explica como se chegou nele.
+            conta.saldo_inicial -= _saldo_que_conta(conta) - antes
+            conta.save(update_fields=["saldo_inicial", "atualizado_em"])
+        feito["movimentos"] += sum(r.get(k, 0) for k in ("criados", "pagos", "faturas", "emprestimos"))
+    return feito
+
+
+class ImportarRecentesSerializer(serializers.Serializer):
+    dias = serializers.IntegerField(min_value=7, max_value=MAXIMO_DIAS, default=60)
+    poupancas = serializers.BooleanField(default=False)
+
+
+class ImportarRecentesView(APIView):
+    def post(self, request):
+        _exigir_liberado(request)
+        s = ImportarRecentesSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        return Response(importar_recentes(request.user, s.validated_data["dias"], s.validated_data["poupancas"]))

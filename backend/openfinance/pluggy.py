@@ -133,6 +133,7 @@ class ContaPluggy:
     numero: str
     saldo: int
     subtipo: str = ""
+    item: str = ""
     banco: str = ""  # nome do banco, para quem tem cartão ou conta em mais de um
     limite: int = 0  # cartão: limite total
     vencimento: date | None = None  # cartão: vencimento da fatura atual
@@ -165,6 +166,7 @@ def contas() -> list[ContaPluggy]:
                     numero=a.get("number") or "",
                     saldo=centavos(a.get("balance")),
                     subtipo=a.get("subtype") or "",
+                    item=item,
                     banco=banco or (credito.get("brand") or "").title(),
                     limite=centavos(credito.get("creditLimit")),
                     vencimento=_data(credito.get("balanceDueDate")),

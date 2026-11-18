@@ -329,3 +329,59 @@ class ContasReaisTests(APITestCase):
         self.client.post("/api/openfinance/trazer-contas/")
         conta.refresh_from_db()
         self.assertEqual(conta.nome, "Conta salário")
+
+
+@override_settings(**LIGADO)
+@patch("openfinance.pluggy._get", side_effect=api_falsa)
+class ImportarRecentesTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.usuario = Usuario.objects.create_user(email="eu@exemplo.com", password="senha-forte-123")
+        criar_categorias_padrao(self.usuario)
+        self.client.force_authenticate(self.usuario)
+        with patch("openfinance.pluggy._get", side_effect=api_falsa):
+            self.client.post("/api/openfinance/trazer-contas/")
+        self.conta = Conta.objects.get(dono=self.usuario)
+        self.cartao = Cartao.objects.get(dono=self.usuario)
+
+    def importar(self):
+        import sys
+
+        modulo = sys.modules[__name__]
+        pagamento = tx("m4", "2026-11-06", "Pagamento de fatura", 450.9)
+        with patch.object(modulo, "TRANSACOES_CONTA", TRANSACOES_CONTA + [pagamento]), patch("openfinance.views.date") as d:
+            d.today.return_value = date(2026, 11, 12)
+            d.fromisoformat = date.fromisoformat
+            return self.client.post("/api/openfinance/importar-recentes/", {"dias": 60}, format="json")
+
+    def test_cartao_fica_no_cartao_e_conta_vira_lancamento(self, _):
+        r = self.importar()
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["pulados"], [])
+        # Fatura de outubro: 2 únicas + parcela 3/10 e as 7 previstas. A de novembro (padaria) vem do
+        # banco e substitui a previsão da 4/10 naquele ciclo, que o banco real traria junto.
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 10)
+        self.assertTrue(Lancamento.objects.filter(cartao=self.cartao, descricao="Padaria do Zé").exists())
+        em_conta = Lancamento.objects.filter(conta=self.conta).order_by("data")
+        self.assertEqual([(l.descricao, l.natureza) for l in em_conta], [("Maria Exemplo", "despesa"), ("Empresa X", "receita")])
+        # O pagamento da fatura marca a fatura como paga, não vira despesa (seria contar duas vezes).
+        from financas.models import PagamentoFatura
+
+        self.assertTrue(PagamentoFatura.objects.filter(cartao=self.cartao, valor=45_090).exists())
+        # O saldo de hoje continua o do banco.
+        self.conta.refresh_from_db()
+        self.assertEqual(self.conta.saldo_inicial + 100_000 - 8_590 - 45_090, 152_035)
+
+        # De novo: nada duplica.
+        self.importar()
+        self.assertEqual(Lancamento.objects.filter(conta=self.conta).count(), 2)
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 10)
+        saldo = self.conta.saldo_inicial
+        self.conta.refresh_from_db()
+        self.assertEqual(self.conta.saldo_inicial, saldo)
+
+    def test_cartao_sem_datas_fica_de_fora(self, _):
+        Vinculo.objects.filter(cartao=self.cartao).update(conferir_datas=True)
+        r = self.importar().json()
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 0)
+        self.assertEqual(len(r["pulados"]), 1)

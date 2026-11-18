@@ -208,6 +208,8 @@ export function TrazerDoBanco({ automatico = false, aoTrazer }: { automatico?: b
     setTrazendo(true)
     try {
       const r = await api<ContasTrazidas>('/openfinance/trazer-contas/', { method: 'POST' })
+      // Primeiro acesso: já traz os últimos meses, para o app não abrir vazio.
+      if (automatico && (r.contas.length || r.cartoes.length)) await api('/openfinance/importar-recentes/', { method: 'POST', body: { dias: 60 } })
       const nomes = [...r.contas, ...r.cartoes]
       const partes = [nomes.length ? `Trouxemos do banco: ${nomes.join(', ')}.` : 'Tudo o que está conectado no banco já está aqui.']
       if (r.renomeadas.length) partes.push(`Nomes acertados: ${r.renomeadas.join(', ')}.`)
@@ -294,5 +296,78 @@ export function ConferirDatas({ cartao, aoSalvar }: { cartao: { id: number; dia_
         {salvando ? 'Salvando…' : 'Salvar os dias'}
       </button>
     </div>
+  )
+}
+
+interface Importados {
+  lancamentos_cartao: number
+  faturas: number
+  movimentos: number
+  pulados: string[]
+}
+
+/** Traz de uma vez os últimos dias de todas as contas e cartões ligados, sem revisar linha a linha. */
+export function ImportarRecentes() {
+  const of = useOpenFinance()
+  const [dias, setDias] = useState(60)
+  const [poupancas, setPoupancas] = useState(false)
+  const [rodando, setRodando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [r, setR] = useState<Importados | null>(null)
+
+  if (!of.ativo || !of.contas.some((c) => c.conta || c.cartao)) return null
+
+  async function importar() {
+    setErro(null)
+    setR(null)
+    setRodando(true)
+    try {
+      setR(await api<Importados>('/openfinance/importar-recentes/', { method: 'POST', body: { dias, poupancas } }))
+    } catch (err) {
+      setErro((err as Error).message || 'Não foi possível importar.')
+    } finally {
+      setRodando(false)
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3 border-b border-linha pb-5">
+      <h2 className="text-lg font-bold">Tudo do banco de uma vez</h2>
+      <p className="text-[15px] leading-snug text-suave">
+        Contas viram lançamentos, que você categoriza depois. Compras do cartão ficam no cartão, e em Lançamentos aparece só a fatura. O que já
+        foi importado não se repete.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <Campo label="Período">
+          <select value={dias} onChange={(e) => setDias(Number(e.target.value))} className={campo}>
+            <option value={30}>Últimos 30 dias</option>
+            <option value={60}>Últimos 60 dias</option>
+            <option value={90}>Últimos 90 dias</option>
+            <option value={180}>Últimos 6 meses</option>
+          </select>
+        </Campo>
+        <label className="flex min-h-[50px] cursor-pointer items-center gap-2 text-[15px] font-semibold">
+          <input type="checkbox" checked={poupancas} onChange={(e) => setPoupancas(e.target.checked)} className="size-5 accent-tinta" />
+          Incluir poupanças
+        </label>
+      </div>
+      <button onClick={importar} disabled={rodando} className={`${botaoPrimario} disabled:opacity-60`}>
+        <Icon name="buscar" size={20} />
+        {rodando ? 'Importando do banco…' : 'Importar do banco'}
+      </button>
+      {erro && <Erro>{erro}</Erro>}
+      {r && (
+        <div className="flex flex-col gap-1 text-[15px]">
+          <p className="font-semibold text-musgo">
+            {r.movimentos} movimentos das contas e {r.lancamentos_cartao} lançamentos em {r.faturas} faturas de cartão.
+          </p>
+          {r.pulados.map((p) => (
+            <p key={p} className="text-ambar-texto">
+              {p}
+            </p>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

@@ -6,6 +6,7 @@ ao dono da instância. Por isso só os e-mails de PLUGGY_USUARIOS enxergam esses
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -82,6 +83,48 @@ def _data(texto: str | None) -> date | None:
     return date.fromisoformat(texto[:10]) if texto else None
 
 
+# Código do banco (COMPE), que abre o número de transferência da conta: "0260/0001/12345-6".
+BANCOS = {
+    "001": "Banco do Brasil",
+    "033": "Santander",
+    "041": "Banrisul",
+    "070": "BRB",
+    "077": "Inter",
+    "104": "Caixa",
+    "208": "BTG Pactual",
+    "212": "Banco Original",
+    "237": "Bradesco",
+    "260": "Nubank",
+    "290": "PagBank",
+    "323": "Mercado Pago",
+    "336": "C6 Bank",
+    "341": "Itaú",
+    "380": "PicPay",
+    "422": "Safra",
+    "655": "Neon",
+    "748": "Sicredi",
+    "756": "Sicoob",
+}
+# Conectores que não são o banco: com o MeuPluggy o banco vem do número da conta ou do nome.
+_INTERMEDIARIOS = ("meupluggy", "meu pluggy", "pluggy")
+
+
+def _banco_do_numero(transferencia: str) -> str:
+    codigo = (transferencia or "").split("/")[0].strip().lstrip("0").zfill(3)
+    return BANCOS.get(codigo, "")
+
+
+_APELIDOS = {"nu pagamentos": "Nubank", "nu financeira": "Nubank", "itau unibanco": "Itaú", "caixa economica": "Caixa", "c6": "C6 Bank", "btg": "BTG Pactual"}
+
+
+def _banco_no_texto(*textos: str) -> str:
+    from importacao.leitores.base import normalizar
+
+    texto = f" {normalizar(' '.join(textos))} "
+    nomes = {normalizar(n): n for n in BANCOS.values()} | _APELIDOS
+    return next((n for chave, n in sorted(nomes.items(), key=lambda x: -len(x[0])) if f" {chave} " in texto), "")
+
+
 @dataclass
 class ContaPluggy:
     id: str
@@ -90,6 +133,7 @@ class ContaPluggy:
     numero: str
     saldo: int
     subtipo: str = ""
+    banco: str = ""  # nome do banco, para quem tem cartão ou conta em mais de um
     limite: int = 0  # cartão: limite total
     vencimento: date | None = None  # cartão: vencimento da fatura atual
     fechamento: date | None = None
@@ -99,7 +143,19 @@ def contas() -> list[ContaPluggy]:
     """As contas e cartões de todos os itens configurados."""
     resultado = []
     for item in settings.PLUGGY_ITEM_IDS:
-        for a in _get("/accounts", itemId=item).get("results", []):
+        brutas = _get("/accounts", itemId=item).get("results", [])
+        conector = ((_get(f"/items/{item}").get("connector") or {}).get("name") or "").strip()
+        if conector.lower() in _INTERMEDIARIOS:
+            conector = ""
+        # Um item é um banco: o número de uma conta corrente identifica o banco do cartão também.
+        # Com o MeuPluggy o conector não diz o banco: vem do número de transferência ou do nome
+        # da conta corrente ("Nu Pagamentos S.A. - Instituição de Pagamento"), que vale para o cartão.
+        banco = (
+            conector
+            or next((b for a in brutas if (b := _banco_do_numero((a.get("bankData") or {}).get("transferNumber", "")))), "")
+            or _banco_no_texto(*(f"{a.get('marketingName') or ''} {a.get('name') or ''}" for a in brutas))
+        )
+        for a in brutas:
             credito = a.get("creditData") or {}
             resultado.append(
                 ContaPluggy(
@@ -109,12 +165,30 @@ def contas() -> list[ContaPluggy]:
                     numero=a.get("number") or "",
                     saldo=centavos(a.get("balance")),
                     subtipo=a.get("subtype") or "",
+                    banco=banco or (credito.get("brand") or "").title(),
                     limite=centavos(credito.get("creditLimit")),
                     vencimento=_data(credito.get("balanceDueDate")),
                     fechamento=_data(credito.get("balanceCloseDate")),
                 )
             )
     return resultado
+
+
+_RAZAO_SOCIAL = re.compile(r"\b(s\.?\s?a\.?|ltda|instituic[aã]o de pagamento|banco m[uú]ltiplo|cooperativa)\b", re.I)
+
+
+def nome_com_banco(c: "ContaPluggy", padrao: str) -> str:
+    """'platinum' do Nubank vira 'Nubank Platinum'; a conta 'Nu Pagamentos S.A. - ...' vira 'Nubank'."""
+    nome = c.nome.strip()
+    if c.banco and (not nome or _RAZAO_SOCIAL.search(nome)):
+        # Nome jurídico da instituição: fica só o banco (e o tipo, se for poupança).
+        return f"{c.banco} Poupança" if c.subtipo == "SAVINGS_ACCOUNT" else c.banco
+    nome = nome or padrao
+    if nome.islower():
+        nome = nome.title()
+    if c.banco and c.banco.lower() not in nome.lower():
+        return f"{c.banco} {nome}"
+    return nome
 
 
 def conta(conta_id: str) -> ContaPluggy | None:

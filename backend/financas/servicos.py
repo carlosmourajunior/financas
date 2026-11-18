@@ -18,6 +18,15 @@ def somar_meses(d: date, meses: int, dia: int | None = None) -> date:
     return date(ano, mes, min(dia, calendar.monthrange(ano, mes)[1]))
 
 
+def fecha_do_mes(cartao, d: date, meses: int = 0) -> date:
+    """Dia em que fecha a fatura do cartão no mês de `d` (mais `meses`): o registrado pelo banco ou o de costume."""
+    alvo = somar_meses(d, meses, 1)
+    # Lido do __dict__: em migrações antigas o campo fica de fora da consulta (a coluna ainda não existe).
+    fechamentos = cartao.__dict__.get("fechamentos") or {}
+    dia = fechamentos.get(f"{alvo.year}-{alvo.month:02d}") or cartao.dia_fechamento
+    return somar_meses(alvo, 0, dia)
+
+
 def fim_do_mes(d: date) -> date:
     return date(d.year, d.month, calendar.monthrange(d.year, d.month)[1])
 
@@ -153,7 +162,7 @@ def no_cartao(qs) -> int:
 
 
 def fatura_que_fecha_em(cartao: Cartao, fechamento: date) -> Fatura:
-    anterior = somar_meses(fechamento, -1, cartao.dia_fechamento)
+    anterior = fecha_do_mes(cartao, fechamento, -1)
     abre = anterior + timedelta(days=1)
     total = no_cartao(Lancamento.objects.filter(dono=cartao.dono, cartao=cartao, data__gte=abre, data__lte=fechamento))
     return Fatura(cartao, abre, fechamento, _vencimento(cartao, fechamento), total)
@@ -161,20 +170,20 @@ def fatura_que_fecha_em(cartao: Cartao, fechamento: date) -> Fatura:
 
 def fechamento_de(cartao: Cartao, d: date) -> date:
     """Dia em que fecha a fatura onde cai a data `d`."""
-    fecha = somar_meses(d, 0, cartao.dia_fechamento)
-    return fecha if d <= fecha else somar_meses(fecha, 1, cartao.dia_fechamento)
+    fecha = fecha_do_mes(cartao, d, 0)
+    return fecha if d <= fecha else fecha_do_mes(cartao, fecha, 1)
 
 
 def fatura_aberta(cartao: Cartao, hoje: date) -> Fatura:
-    fecha_este_mes = date(hoje.year, hoje.month, cartao.dia_fechamento)
-    fechamento = fecha_este_mes if hoje <= fecha_este_mes else somar_meses(fecha_este_mes, 1)
+    fecha_este_mes = fecha_do_mes(cartao, hoje)
+    fechamento = fecha_este_mes if hoje <= fecha_este_mes else fecha_do_mes(cartao, hoje, 1)
     return fatura_que_fecha_em(cartao, fechamento)
 
 
 def fatura_atual(cartao: Cartao, hoje: date) -> Fatura:
     """A fatura para olhar agora: a que já fechou e ainda não foi paga; paga (ou vazia), a aberta."""
     aberta = fatura_aberta(cartao, hoje)
-    fechada = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, cartao.dia_fechamento))
+    fechada = fatura_que_fecha_em(cartao, fecha_do_mes(cartao, aberta.fecha, -1))
     if fechada.total > 0 and not PagamentoFatura.objects.filter(cartao=cartao, fecha=fechada.fecha).exists():
         return fechada
     return aberta
@@ -183,7 +192,7 @@ def fatura_atual(cartao: Cartao, hoje: date) -> Fatura:
 def faturas_vencendo(cartao: Cartao, inicio: date, fim: date) -> list[Fatura]:
     """Faturas (fechadas ou não) cujo vencimento cai no período."""
     aberta = fatura_aberta(cartao, inicio)
-    candidatas = [fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, cartao.dia_fechamento)), aberta]
+    candidatas = [fatura_que_fecha_em(cartao, fecha_do_mes(cartao, aberta.fecha, -1)), aberta]
     return [f for f in candidatas if inicio <= f.vence <= fim]
 
 
@@ -197,13 +206,13 @@ def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | Non
     """Uma fatura do cartão (a atual, ou a que fecha em `fecha`) com as compras, mais parcelas e próximas faturas."""
     aberta = fatura_aberta(cartao, hoje)
     # Assinaturas no cartão entram também nas próximas faturas e na que foi pedida.
-    ate = somar_meses(aberta.fecha, meses, cartao.dia_fechamento)
+    ate = fecha_do_mes(cartao, aberta.fecha, meses)
     gerar_ocorrencias(cartao.dono, max(ate, fecha) if fecha else ate)
     escolhida = fatura_que_fecha_em(cartao, fecha) if fecha else fatura_atual(cartao, hoje)
     proximas = []
     f_proxima = aberta.fecha
     for _ in range(meses):
-        f_proxima = somar_meses(f_proxima, 1, cartao.dia_fechamento)
+        f_proxima = fecha_do_mes(cartao, f_proxima, 1)
         f = fatura_que_fecha_em(cartao, f_proxima)
         proximas.append({"fecha": f.fecha, "vence": f.vence, "total": f.total})
 
@@ -236,8 +245,8 @@ def detalhe_cartao(cartao: Cartao, hoje: date, meses: int = 3, fecha: date | Non
             "vence": escolhida.vence,
             "total": escolhida.total,
             "aberta": escolhida.fecha == aberta.fecha,
-            "anterior": somar_meses(escolhida.fecha, -1, cartao.dia_fechamento),
-            "seguinte": somar_meses(escolhida.fecha, 1, cartao.dia_fechamento),
+            "anterior": fecha_do_mes(cartao, escolhida.fecha, -1),
+            "seguinte": fecha_do_mes(cartao, escolhida.fecha, 1),
             "pagamento": _pagamento(pagamento),
         },
         "compras": [
@@ -273,7 +282,7 @@ def faturas_do_mes(dono, mes: date, hoje: date) -> list[dict]:
     """Uma linha por fatura que vence no mês, para a lista de lançamentos."""
     inicio, fim = inicio_do_mes(mes), fim_do_mes(mes)
     linhas = []
-    for c in Cartao.objects.filter(dono=dono):
+    for c in Cartao.objects.filter(dono=dono, ativo=True):
         pagos = pagamentos_por_fecha(c)
         for f in faturas_vencendo(c, inicio, fim):
             if f.total:
@@ -304,7 +313,7 @@ def faturas_em_aberto(cartao: Cartao, ate: date, meses: int = 6) -> list[Fatura]
         f = fatura_que_fecha_em(cartao, fecha)
         if f.vence <= ate and f.total > 0 and f.fecha not in pagos:
             abertas.append(f)
-        fecha = somar_meses(fecha, -1, cartao.dia_fechamento)
+        fecha = fecha_do_mes(cartao, fecha, -1)
     return sorted(abertas, key=lambda f: f.vence)
 
 
@@ -317,9 +326,9 @@ def quitar_faturas_vencidas(cartao: Cartao, hoje: date) -> int:
     if not primeira:
         return 0
     pagos = pagamentos_por_fecha(cartao)
-    fecha = somar_meses(primeira, 0, cartao.dia_fechamento)
+    fecha = fecha_do_mes(cartao, primeira, 0)
     if fecha < primeira:
-        fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
+        fecha = fecha_do_mes(cartao, fecha, 1)
     criados = 0
     while True:
         f = fatura_que_fecha_em(cartao, fecha)
@@ -328,7 +337,7 @@ def quitar_faturas_vencidas(cartao: Cartao, hoje: date) -> int:
         if f.total > 0 and f.fecha not in pagos:
             PagamentoFatura.objects.create(dono=cartao.dono, cartao=cartao, fecha=f.fecha, valor=f.total, data=f.vence)
             criados += 1
-        fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
+        fecha = fecha_do_mes(cartao, fecha, 1)
 
 
 def pendencias(dono, hoje: date, cartoes: list[Cartao], dias: int = 180) -> list[dict]:
@@ -365,7 +374,7 @@ def resumo(dono, hoje: date) -> dict:
     # Saldo em conta: o que já aconteceu nas contas até hoje.
     # Saldo em conta: o que já foi pago ou recebido nas contas, mais as faturas pagas.
     em_conta = lanc.filter(conta__isnull=False, pago=True)
-    cartoes = list(Cartao.objects.filter(dono=dono))
+    cartoes = list(Cartao.objects.filter(dono=dono, ativo=True))
     saldo = (
         (Conta.objects.filter(dono=dono).aggregate(s=Sum("saldo_inicial"))["s"] or 0)
         + _soma(em_conta.filter(natureza=Natureza.RECEITA))
@@ -405,7 +414,7 @@ def resumo(dono, hoje: date) -> dict:
     faturas_que_fecham = 0
     por_cartao = []
     for c in cartoes:
-        f = fatura_que_fecha_em(c, somar_meses(inicio, 0, c.dia_fechamento))
+        f = fatura_que_fecha_em(c, fecha_do_mes(c, inicio, 0))
         no_mes |= Q(cartao=c, data__gte=f.abre, data__lte=f.fecha)
         faturas_que_fecham += f.total
         if f.total:
@@ -493,3 +502,55 @@ def resumo(dono, hoje: date) -> dict:
             "devem_pessoas": [e.nome for e in devem if saldo_emp(e) > 0],
         },
     }
+
+
+@transaction.atomic
+def repetir_lancamento(lanc: Lancamento, tipo: str, *, frequencia: str = Frequencia.MENSAL, parcela_atual: int = 1, parcela_total: int = 1) -> int:
+    """Um lançamento único (vindo do banco, por exemplo) passa a recorrente ou a parcela k de n.
+
+    Recorrente: vira a primeira ocorrência e as próximas aparecem nos meses seguintes.
+    Parcelada: as parcelas que faltam são criadas mês a mês, como previsão. Devolve quantas criou.
+    """
+    hoje = date.today()
+    if tipo == Lancamento.Tipo.RECORRENTE:
+        rec = Recorrencia.objects.create(
+            dono=lanc.dono,
+            descricao=lanc.descricao,
+            valor=lanc.valor,
+            natureza=lanc.natureza,
+            categoria=lanc.categoria,
+            conta=lanc.conta,
+            cartao=lanc.cartao,
+            frequencia=frequencia,
+            inicio=lanc.data,
+            gerada_ate=lanc.data,
+        )
+        lanc.tipo, lanc.recorrencia = Lancamento.Tipo.RECORRENTE, rec
+        lanc.save(update_fields=["tipo", "recorrencia", "atualizado_em"])
+        return gerar_ocorrencias(lanc.dono, fim_do_mes(somar_meses(hoje, 1)))
+
+    grupo = Lancamento.novo_grupo()
+    lanc.tipo, lanc.grupo, lanc.parcela_atual, lanc.parcela_total = Lancamento.Tipo.PARCELADA, grupo, parcela_atual, parcela_total
+    lanc.save(update_fields=["tipo", "grupo", "parcela_atual", "parcela_total", "atualizado_em"])
+    seguintes = []
+    for k in range(parcela_atual + 1, parcela_total + 1):
+        data = somar_meses(lanc.data, k - parcela_atual)
+        seguintes.append(
+            Lancamento(
+                dono=lanc.dono,
+                descricao=lanc.descricao,
+                valor=lanc.valor,
+                natureza=lanc.natureza,
+                data=data,
+                categoria=lanc.categoria,
+                conta=lanc.conta,
+                cartao=lanc.cartao,
+                tipo=Lancamento.Tipo.PARCELADA,
+                grupo=grupo,
+                parcela_atual=k,
+                parcela_total=parcela_total,
+                pago=data <= hoje,
+            )
+        )
+    Lancamento.objects.bulk_create(seguintes)
+    return len(seguintes)

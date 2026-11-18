@@ -58,6 +58,23 @@ npm install
 npm run dev
 ```
 
+## Open Finance (opcional, uso pessoal)
+
+Busca fatura do cartão e extrato da conta direto do banco pela [Pluggy](https://pluggy.ai), usando o
+**MeuPluggy** (gratuito para ler as próprias contas, até 5 conexões, sem uso comercial). O que vem do
+banco cai na mesma revisão da importação de arquivo e segue a mesma regra de repetidos.
+
+Fica desligado até preencher no `.env` (veja `.env.example`):
+
+- `PLUGGY_CLIENT_ID` e `PLUGGY_CLIENT_SECRET`: dashboard.pluggy.ai > Applications
+- `PLUGGY_ITEM_IDS`: os itens do MeuPluggy conectados na Demo da aplicação, separados por vírgula
+- `PLUGGY_USUARIOS`: e-mail de login no app de quem pode ver essas contas. Os itens são de uma pessoa,
+  então os outros usuários da mesma instância não veem nada.
+
+Desligado, a opção "Direto do banco" não aparece e as rotas `/api/openfinance/...` respondem 403.
+A autorização do MeuPluggy vale um ano; depois disso é preciso autorizar de novo na Demo da Pluggy
+(o item pode ganhar outro id).
+
 ## Imagem de produção do front
 
 ```bash

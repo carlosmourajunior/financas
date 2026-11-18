@@ -2,6 +2,8 @@ import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Erro, FormConta } from '../components/Formularios'
 import { FormEmprestimo } from './Emprestimos'
+import { BuscarExtrato, EscolherOrigem } from '../components/OpenFinance'
+import type { Origem, useOpenFinance } from '../lib/openfinance'
 import Icon from '../components/Icon'
 import { Abas, Campo, Secao, botaoPrimario, campo } from '../components/ui'
 import { api, type Pagina } from '../lib/api'
@@ -63,7 +65,7 @@ function mesmo(a: string, b: string) {
   return a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
-export default function ImportarExtrato() {
+export default function ImportarExtrato({ openFinance }: { openFinance: ReturnType<typeof useOpenFinance> }) {
   const navigate = useNavigate()
   const cad = useCadastros()
   const emprestimos = useApi<Pagina<Emprestimo>>('/emprestimos/?direcao=devo&limit=500')
@@ -79,6 +81,7 @@ export default function ImportarExtrato() {
   const [gravando, setGravando] = useState(false)
   const [novaConta, setNovaConta] = useState(false)
   const [novoEmprestimo, setNovoEmprestimo] = useState<number | null>(null)
+  const [origem, setOrigem] = useState<Origem>('arquivo')
 
   const contaEscolhida = conta || (cad.contas[0] ? String(cad.contas[0].id) : '')
 
@@ -192,14 +195,39 @@ export default function ImportarExtrato() {
           <option value={NOVA}>+ Nova conta</option>
         </select>
       </Campo>
-      <label className="relative flex cursor-pointer items-center gap-3.5 rounded-[14px] border-2 border-dashed border-[#9aaaa7] bg-white px-4 py-5 focus-within:outline-2 focus-within:outline-tinta">
-        <Icon name="arquivo" size={28} />
-        <span className="flex flex-col gap-0.5">
-          <span className="text-base font-bold">{lendo ? 'Lendo o arquivo…' : nomeArquivo || 'Escolher arquivo'}</span>
-          <span className="text-sm text-suave">CSV do extrato do Banco do Brasil</span>
-        </span>
-        <input type="file" accept=".csv" onChange={ler} disabled={lendo || !contaEscolhida} className="sr-only" />
-      </label>
+      {openFinance.ativo && (
+        <EscolherOrigem
+          valor={origem}
+          onChange={(o) => {
+            setOrigem(o)
+            setErro(null)
+          }}
+        />
+      )}
+      {openFinance.ativo && origem === 'banco' ? (
+        <BuscarExtrato
+          key={contaEscolhida}
+          conta={contaEscolhida}
+          contas={openFinance.contas}
+          aoLer={(p, nome) => {
+            setErro(null)
+            setConta(contaEscolhida)
+            setNomeArquivo(nome)
+            setPrevia(p)
+            setItens(p.itens)
+            setMexidos(new Set())
+          }}
+        />
+      ) : (
+          <label className="relative flex cursor-pointer items-center gap-3.5 rounded-[14px] border-2 border-dashed border-[#9aaaa7] bg-white px-4 py-5 focus-within:outline-2 focus-within:outline-tinta">
+            <Icon name="arquivo" size={28} />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-base font-bold">{lendo ? 'Lendo o arquivo…' : nomeArquivo || 'Escolher arquivo'}</span>
+              <span className="text-sm text-suave">CSV do extrato do Banco do Brasil</span>
+            </span>
+            <input type="file" accept=".csv" onChange={ler} disabled={lendo || !contaEscolhida} className="sr-only" />
+          </label>
+      )}
 
       {erro && <Erro>{erro}</Erro>}
 

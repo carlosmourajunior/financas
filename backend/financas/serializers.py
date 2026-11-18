@@ -3,7 +3,7 @@ from datetime import date
 from rest_framework import serializers
 
 from .models import Cartao, Categoria, Conta, Emprestimo, Frequencia, Lancamento, PagamentoEmprestimo, PagamentoFatura, Recorrencia
-from .servicos import criar_parcelas, fatura_que_fecha_em, gerar_ocorrencias, somar_meses, vencimentos_das_parcelas
+from .servicos import criar_parcelas, fatura_que_fecha_em, fecha_do_mes, gerar_ocorrencias, somar_meses, vencimentos_das_parcelas
 
 
 class DoUsuarioSerializer(serializers.ModelSerializer):
@@ -29,7 +29,7 @@ class ContaSerializer(serializers.ModelSerializer):
 class CartaoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cartao
-        fields = ["id", "nome", "final", "limite", "dia_fechamento", "dia_vencimento"]
+        fields = ["id", "nome", "final", "limite", "dia_fechamento", "dia_vencimento", "ativo"]
 
     def validate_final(self, valor):
         if valor and not (valor.isdigit() and len(valor) == 4):
@@ -169,7 +169,7 @@ class PagamentoFaturaSerializer(DoUsuarioSerializer):
 
     def validate(self, dados):
         cartao, fecha = dados.get("cartao", getattr(self.instance, "cartao", None)), dados.get("fecha", getattr(self.instance, "fecha", None))
-        if fecha != somar_meses(fecha, 0, cartao.dia_fechamento):
+        if fecha != fecha_do_mes(cartao, fecha, 0):
             raise serializers.ValidationError({"fecha": "Não é um dia de fechamento deste cartão."})
         repetido = PagamentoFatura.objects.filter(cartao=cartao, fecha=fecha)
         if self.instance:

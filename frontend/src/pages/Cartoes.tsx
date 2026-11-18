@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
 import { FormCartao } from '../components/Formularios'
+import { ConferirDatas, TrazerDoBanco } from '../components/OpenFinance'
+import { useOpenFinance } from '../lib/openfinance'
 import Icon from '../components/Icon'
 import LinhaComData from '../components/LinhaComData'
 import { Abas, Barra, Secao, Segmentos, Titulo, botaoSecundario } from '../components/ui'
@@ -20,12 +22,15 @@ function mesAno(iso: string) {
 
 export default function Cartoes() {
   const lista = useApi<Pagina<Cartao>>('/cartoes/?limit=500')
-  const cartoes = lista.dados?.results ?? []
+  const todos = lista.dados?.results ?? []
+  const cartoes = todos.filter((x) => x.ativo !== false)
+  const desativados = todos.filter((x) => x.ativo === false)
   // ?cartao=&fecha= abre uma fatura específica (vindo de Lançamentos, por exemplo).
   const [busca, setBusca] = useSearchParams()
   const sel = busca.get('cartao') ?? ''
   const fecha = busca.get('fecha')
   const [novo, setNovo] = useState(false)
+  const of = useOpenFinance()
   const [soSemCategoria, setSoSemCategoria] = useState(false)
   const categorias = useCadastros().categorias.filter((x) => x.natureza === 'despesa')
   const c = cartoes.find((x) => String(x.id) === sel) ?? cartoes[0]
@@ -67,6 +72,17 @@ export default function Cartoes() {
     )
   }
 
+  const listaDesativados = desativados.length > 0 && (
+    <Secao titulo="Cartões desativados">
+      {desativados.map((x) => (
+        <div key={x.id} className="flex items-center justify-between gap-3 border-b border-linha py-3">
+          <span className="text-base font-semibold text-suave">{x.final ? `${x.nome} ${x.final}` : x.nome}</span>
+          <AtivarCartao cartao={x} aoMudar={lista.recarregar} />
+        </div>
+      ))}
+    </Secao>
+  )
+
   if (!c || novo) {
     return (
       <div className="mx-auto flex max-w-3xl flex-col gap-3.5 px-5 pt-5 lg:px-8 lg:pt-7">
@@ -74,9 +90,16 @@ export default function Cartoes() {
         <p className="text-[17px] leading-snug text-suave">
           {c ? 'Novo cartão' : 'Cadastre seu cartão para acompanhar a fatura, o limite e as parcelas que ainda vêm.'}
         </p>
-        <div className="max-w-xl">
+        <div className="flex max-w-xl flex-col gap-4">
+          <TrazerDoBanco
+            aoTrazer={() => {
+              lista.recarregar()
+              of.recarregar()
+            }}
+          />
           <FormCartao aoSalvar={salvo} />
         </div>
+        {listaDesativados}
       </div>
     )
   }
@@ -92,6 +115,19 @@ export default function Cartoes() {
         valor={String(c.id)}
         onChange={setSel}
       />
+
+      <AtivarCartao cartao={c} aoMudar={lista.recarregar} />
+      {of.contas.some((x) => x.cartao === c.id && x.conferir_datas) && (
+        <ConferirDatas
+          key={c.id}
+          cartao={c}
+          aoSalvar={() => {
+            of.recarregar()
+            lista.recarregar()
+            detalhe.recarregar()
+          }}
+        />
+      )}
 
       {detalhe.erro && <p className="py-10 text-center text-suave">Não foi possível carregar o cartão. {detalhe.erro}</p>}
       {!d && !detalhe.erro && <p className="py-10 text-center text-suave">Carregando…</p>}
@@ -220,6 +256,7 @@ export default function Cartoes() {
           </Secao>
         </div>
       )}
+      {listaDesativados}
     </div>
   )
 }
@@ -280,5 +317,34 @@ function EscolherCategoria({
       </select>
       {erro && <span className="text-sm font-semibold text-ambar-texto">{erro}</span>}
     </span>
+  )
+}
+
+/** Desativar some com o cartão das faturas e previsões (o histórico fica); reativar traz de volta. */
+function AtivarCartao({ cartao, aoMudar }: { cartao: Cartao; aoMudar: () => void }) {
+  const [salvando, setSalvando] = useState(false)
+  const ativo = cartao.ativo !== false
+  async function trocar() {
+    setSalvando(true)
+    try {
+      await api(`/cartoes/${cartao.id}/`, { method: 'PATCH', body: { ativo: !ativo } })
+      aoMudar()
+    } finally {
+      setSalvando(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={trocar}
+      disabled={salvando}
+      className={
+        ativo
+          ? 'min-h-9 cursor-pointer self-end text-[13px] font-semibold text-suave underline underline-offset-2 disabled:opacity-60'
+          : 'min-h-10 cursor-pointer rounded-lg border border-borda bg-white px-3 text-sm font-bold disabled:opacity-60'
+      }
+    >
+      {salvando ? 'Salvando…' : ativo ? 'Não uso mais este cartão' : 'Reativar'}
+    </button>
   )
 }

@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from django.db import transaction
 
 from financas.models import Cartao, Categoria, Lancamento, Natureza
-from financas.servicos import Fatura, _vencimento, fatura_que_fecha_em, somar_meses
+from financas.servicos import Fatura, _vencimento, fatura_que_fecha_em, fecha_do_mes, somar_meses
 
 from .leitores import FaturaLida, Item, Tipo
 from .leitores.base import normalizar, sem_acento
@@ -47,15 +47,15 @@ IMPORTAVEIS = (Tipo.COMPRA, Tipo.ENCARGO, Tipo.CREDITO)
 def ciclo_da_fatura(cartao: Cartao, lida: FaturaLida) -> Fatura:
     """A fatura do app que corresponde à do arquivo, pelo vencimento ou pelas compras."""
     if lida.vencimento:
-        candidatas = [somar_meses(lida.vencimento, -m, cartao.dia_fechamento) for m in range(0, 3)]
+        candidatas = [fecha_do_mes(cartao, lida.vencimento, -m) for m in range(0, 3)]
         fecha = min(candidatas, key=lambda f: abs((_vencimento(cartao, f) - lida.vencimento).days))
     else:
         # Sem vencimento no arquivo: o ciclo que contém a compra mais recente sem parcela.
         datas = [i.data for i in lida.itens if i.tipo == Tipo.COMPRA and not i.parcela_total] or [i.data for i in lida.itens]
         ultima = max(datas)
-        fecha = date(ultima.year, ultima.month, cartao.dia_fechamento)
+        fecha = fecha_do_mes(cartao, ultima)
         if ultima > fecha:
-            fecha = somar_meses(fecha, 1, cartao.dia_fechamento)
+            fecha = fecha_do_mes(cartao, fecha, 1)
     return fatura_que_fecha_em(cartao, fecha)
 
 
@@ -181,20 +181,44 @@ def grupo_da_chave(cartao: Cartao, chave: str) -> uuid.UUID:
     return uuid.uuid5(uuid.NAMESPACE_URL, f"financas:{cartao.pk}:{chave}")
 
 
+def _parecidas(a: str, b: str) -> bool:
+    a, b = normalizar(a).replace(" ", ""), normalizar(b).replace(" ", "")
+    curta = min(len(a), len(b))
+    return curta >= 4 and a[: min(curta, 10)] == b[: min(curta, 10)]
+
+
+def _chave_parecida(cartao: Cartao, ciclo: Fatura, item: dict, usadas: set[str]) -> str | None:
+    atual, total, valor = item["parcela_atual"], item["parcela_total"], item["valor"]
+    folga = max(100, valor // 50)  # até R$ 1 ou 2% de diferença
+    vizinhas = Lancamento.objects.filter(cartao=cartao, parcela_total=total, valor__gte=valor - folga, valor__lte=valor + folga).exclude(chave="")
+    mesma = vizinhas.filter(parcela_atual=atual, data__gte=ciclo.abre, data__lte=ciclo.fecha)
+    seguinte = vizinhas.filter(parcela_atual=atual + 1, data__gt=ciclo.fecha, data__lte=ciclo.fecha + timedelta(days=35))
+    anterior = vizinhas.filter(parcela_atual=atual - 1, data__lt=ciclo.abre, data__gte=ciclo.abre - timedelta(days=35))
+    for l in list(mesma) + list(seguinte) + list(anterior):
+        if l.chave not in usadas and _parecidas(l.descricao, item["descricao"]):
+            return l.chave
+    return None
+
+
 @transaction.atomic
 def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
     """Grava as linhas escolhidas no ciclo que fecha em `fecha`.
 
     O que foi importado antes para este ciclo é apagado e substituído; lançamentos feitos à mão ficam.
+    Na fatura que ainda não fechou, as parcelas previstas de compras antigas também ficam.
     Uma parcela k de n cria também as parcelas seguintes. A compra é reconhecida pela chave em qualquer
     fatura, então importar o mês seguinte (ou um anterior) não duplica parcelas.
     """
     ciclo = fatura_que_fecha_em(cartao, fecha)
-    substituidos, _ = Lancamento.objects.filter(
-        cartao=cartao, importado=True, data__gte=ciclo.abre, data__lte=ciclo.fecha
-    ).delete()
-
     hoje = date.today()
+    anteriores = Lancamento.objects.filter(cartao=cartao, importado=True, data__gte=ciclo.abre, data__lte=ciclo.fecha)
+    if ciclo.fecha >= hoje:
+        # Fatura ainda aberta: o banco só mostra o que já entrou, e as parcelas de compras antigas
+        # costumam aparecer só no fechamento. A previsão delas (criada pela fatura anterior) fica;
+        # se a parcela vier na lista, a mesma linha é atualizada pela chave.
+        anteriores = anteriores.filter(chave="")
+    substituidos, _ = anteriores.delete()
+
     criados = 0
     # Linhas iguais da mesma compra na mesma fatura: a menor fica com ordem 1, e assim por diante.
     ordens: Counter = Counter()
@@ -207,6 +231,20 @@ def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
         base = chave_da_compra(ciclo.fecha, i["descricao"], i["parcela_atual"], i["parcela_total"], 0)
         ordens[base] += 1
         chaves[id(i)] = chave_da_compra(ciclo.fecha, i["descricao"], i["parcela_atual"], i["parcela_total"], ordens[base])
+    # O banco às vezes escreve a mesma compra de outro jeito de uma fatura para outra ("NR *NR ACAMP" e
+    # "NR *NR ACAMPAM") ou muda centavos: a chave sairia outra e a parcela, duplicada. Reaproveita a da
+    # compra já gravada ao lado (mesma parcela neste ciclo, ou a vizinha no ciclo antes ou depois).
+    # Só para a linha cuja chave ainda não existe, e nunca a chave de outra linha desta fatura: duas
+    # linhas com a mesma chave e parcela viram uma só e a fatura perde uma compra.
+    usadas: set[str] = set(chaves.values())
+    gravadas = set(Lancamento.objects.filter(cartao=cartao, chave__in=usadas).values_list("chave", flat=True))
+    for i in parceladas:
+        if chaves[id(i)] in gravadas:
+            continue
+        existente = _chave_parecida(cartao, ciclo, i, usadas)
+        if existente:
+            chaves[id(i)] = existente
+            usadas.add(existente)
 
     for i in itens:
         data_item = _dentro(i["data"], ciclo)

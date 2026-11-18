@@ -26,7 +26,8 @@ export function useCadastros() {
 
   return {
     contas: listaContas,
-    cartoes: listaCartoes,
+    // Desativados ficam de fora das escolhas; o nome deles ainda aparece nos lançamentos antigos.
+    cartoes: listaCartoes.filter((c) => c.ativo !== false),
     categorias: listaCategorias,
     carregando: contas.carregando || cartoes.carregando || categorias.carregando,
     recarregar() {

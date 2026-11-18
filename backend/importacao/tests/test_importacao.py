@@ -244,3 +244,60 @@ class ApiTests(APITestCase):
         r = self.client.post("/api/importar/fatura/", {"arquivo": arquivo, "cartao": self.cartao.id}, format="multipart")
         self.assertEqual(r.status_code, 400)
         self.assertIn("arquivo", r.data)
+
+
+class FaturaAbertaMantemParcelasTests(TestCase):
+    """A fatura aberta vinda do banco traz só as compras novas; as parcelas antigas continuam nela."""
+
+    def test_parcelas_previstas_ficam_no_total_da_aberta(self):
+        from datetime import timedelta
+
+        from financas.servicos import fatura_aberta, somar_meses
+
+        u = get_user_model().objects.create_user(email="p@exemplo.com", password="senha-forte-123")
+        cartao = Cartao.objects.create(dono=u, nome="Nubank", limite=1_000_000, dia_fechamento=8, dia_vencimento=15)
+        hoje = date.today()
+        aberta = fatura_aberta(cartao, hoje)
+        anterior = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, 8))
+        # Fatura fechada: parcela 2 de 3 de uma compra antiga; cria a 3/3 na fatura aberta.
+        confirmar(cartao, anterior.fecha, [{"data": anterior.fecha, "descricao": "Geladeira", "valor": 50_000, "natureza": "despesa", "parcela_atual": 2, "parcela_total": 3}])
+        # Fatura aberta do banco: só a compra nova.
+        nova = {"data": max(aberta.abre, min(hoje, aberta.fecha) - timedelta(days=0)), "descricao": "Mercado", "valor": 20_000, "natureza": "despesa"}
+        confirmar(cartao, aberta.fecha, [nova])
+        confirmar(cartao, aberta.fecha, [nova])  # importar de novo não duplica nem apaga a parcela
+        no_ciclo = Lancamento.objects.filter(cartao=cartao, data__gte=aberta.abre, data__lte=aberta.fecha)
+        self.assertEqual(sorted(no_ciclo.values_list("descricao", "valor")), [("Geladeira", 50_000), ("Mercado", 20_000)])
+        self.assertEqual(fatura_que_fecha_em(cartao, aberta.fecha).total, 70_000)
+
+    def test_mesma_compra_escrita_diferente_nao_duplica_parcela(self):
+        from financas.servicos import fatura_aberta, somar_meses
+
+        u = get_user_model().objects.create_user(email="q@exemplo.com", password="senha-forte-123")
+        cartao = Cartao.objects.create(dono=u, nome="Mercado Pago", limite=1_000_000, dia_fechamento=5, dia_vencimento=10)
+        aberta = fatura_aberta(cartao, date.today())
+        anterior = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, 5))
+        # A fatura fechada projeta a 8/12 na aberta com a descrição daquele mês...
+        confirmar(cartao, anterior.fecha, [{"data": anterior.fecha, "descricao": "NR *NR ACAMP", "valor": 26_683, "natureza": "despesa", "parcela_atual": 7, "parcela_total": 12}])
+        # ...e o banco manda a 8/12 com outra descrição e centavos diferentes.
+        confirmar(cartao, aberta.fecha, [{"data": aberta.fecha, "descricao": "NR *NR ACAMPAM", "valor": 26_685, "natureza": "despesa", "parcela_atual": 8, "parcela_total": 12}])
+        no_ciclo = Lancamento.objects.filter(cartao=cartao, data__gte=aberta.abre, data__lte=aberta.fecha)
+        self.assertEqual(list(no_ciclo.values_list("descricao", "valor")), [("NR *NR ACAMPAM", 26_685)])
+        self.assertEqual(Lancamento.objects.filter(cartao=cartao, parcela_atual=12).count(), 1)
+
+    def test_parecida_nao_rouba_a_chave_de_outra_linha_da_fatura(self):
+        from financas.servicos import fatura_aberta, somar_meses
+
+        u = get_user_model().objects.create_user(email="r@exemplo.com", password="senha-forte-123")
+        cartao = Cartao.objects.create(dono=u, nome="Itaú", limite=1_000_000, dia_fechamento=23, dia_vencimento=1)
+        aberta = fatura_aberta(cartao, date.today())
+        fechada = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -1, 23))
+        anterior = fatura_que_fecha_em(cartao, somar_meses(aberta.fecha, -2, 23))
+        # Mês passado: a parcela 2/6 da compra B.
+        confirmar(cartao, anterior.fecha, [{"data": anterior.fecha, "descricao": "MERCADOLIVRE*LOJAB", "valor": 10_000, "natureza": "despesa", "parcela_atual": 2, "parcela_total": 6}])
+        # Este mês: a 3/6 de B e a 3/6 de outra compra A, parecida e de valor próximo.
+        itens = [
+            {"data": fechada.fecha, "descricao": "MERCADOLIVRE*LOJAA", "valor": 9_950, "natureza": "despesa", "parcela_atual": 3, "parcela_total": 6},
+            {"data": fechada.fecha, "descricao": "MERCADOLIVRE*LOJAB", "valor": 10_000, "natureza": "despesa", "parcela_atual": 3, "parcela_total": 6},
+        ]
+        confirmar(cartao, fechada.fecha, itens)
+        self.assertEqual(fatura_que_fecha_em(cartao, fechada.fecha).total, 19_950)

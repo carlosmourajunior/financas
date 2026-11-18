@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import BotaoPagar from '../components/BotaoPagar'
 import { FormConta } from '../components/Formularios'
 import Icon from '../components/Icon'
+import { TrazerDoBanco } from '../components/OpenFinance'
 import ReguaDoMes from '../components/ReguaDoMes'
 import { Barra, LinhaLink, LinkAcao, Secao, botaoSecundario } from '../components/ui'
 import type { Pagina } from '../lib/api'
@@ -50,6 +51,7 @@ export default function Inicio() {
             Para saber quanto ainda pode gastar, comece pela conta onde o seu dinheiro fica. Depois é só lançar ou importar.
           </p>
         </div>
+        <TrazerDoBanco automatico aoTrazer={() => cad.recarregar()} />
         <FormConta botao="Criar minha primeira conta" aoSalvar={() => cad.recarregar()} />
         <button onClick={sair} className="min-h-11 cursor-pointer self-start text-[15px] font-semibold text-suave lg:hidden">
           Sair

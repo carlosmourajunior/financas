@@ -1,0 +1,220 @@
+"""Transações da Pluggy no mesmo formato que os leitores de arquivo devolvem.
+
+Assim a prévia, a detecção de repetidos e a gravação são as mesmas da importação de arquivo:
+nada que vem do banco entra sem passar pela revisão.
+"""
+
+import re
+from datetime import date, timedelta
+
+from importacao.leitores import ExtratoLido, FaturaLida, Item, Movimento, Tipo
+from importacao.leitores.base import classificar, normalizar
+
+from .pluggy import centavos
+
+# Categoria da Pluggy (em inglês) -> ramo que a importação já sabe traduzir para uma categoria.
+_RAMOS = [
+    (("supermarket", "groceries", "food", "restaurant", "eating", "delivery", "bakery"), "supermercado"),
+    (("health", "pharmacy", "drugstore", "hospital", "dentist", "clinic", "wellness"), "saude"),
+    (("clothing", "apparel", "shoes"), "vestuario"),
+    (("leisure", "entertainment", "streaming", "games", "cinema", "music", "sports", "gym"), "lazer"),
+    (("travel", "airline", "hotel", "accommodation", "tourism"), "viagem"),
+    (("education", "school", "university", "course", "books"), "educacao"),
+    (("transport", "gas station", "fuel", "parking", "taxi", "ride", "toll", "vehicle", "automotive"), "transporte"),
+    (("housing", "rent", "electricity", "water", "utilities", "home", "condominium"), "casa"),
+    (("electronics",), "eletronicos"),
+    (("interest", "fee", "tax", "iof", "late payment"), "encargos"),
+]
+# "LOJA X 03/10" ou "LOJA X PARC 03/10": a parcela já vem nos metadados.
+_PARCELA_NO_FIM = re.compile(r"\s*(-\s*)?(parc(ela)?\.?\s*)?\d{1,2}\s*/\s*\d{1,2}\s*$", re.I)
+
+
+def _ramo(categoria: str | None) -> str | None:
+    texto = (categoria or "").lower()
+    return next((ramo for palavras, ramo in _RAMOS if any(p in texto for p in palavras)), None)
+
+
+def _data(t: dict) -> date:
+    return date.fromisoformat(t["date"][:10])
+
+
+def item_da_fatura(t: dict) -> Item | None:
+    meta = t.get("creditCardMetadata") or {}
+    atual, total = meta.get("installmentNumber"), meta.get("totalInstallments")
+    if not (atual and total and 1 <= atual <= total and total > 1):
+        atual = total = None
+    descricao = (t.get("description") or t.get("descriptionRaw") or "Sem descrição").strip()
+    if atual:
+        descricao = _PARCELA_NO_FIM.sub("", descricao) or descricao
+    # No cartão a compra vem positiva e o pagamento/estorno negativo, como nos arquivos.
+    valor = centavos(t.get("amount"))
+    tipo = classificar(descricao, valor)
+    if tipo in (Tipo.PAGAMENTO, Tipo.SALDO_ANTERIOR) or valor == 0:
+        # O pagamento da fatura anterior aparece no extrato da conta; aqui não vira lançamento.
+        return None
+    return Item(
+        data=_data(t),
+        descricao=descricao[:120],
+        valor=valor,
+        tipo=tipo,
+        parcela_atual=atual,
+        parcela_total=total,
+        categoria=_ramo(t.get("category")),
+    )
+
+
+def fatura_fechada(nome: str, final: str, conta_faturas: list[dict], fatura: dict, transacoes: list[dict]) -> FaturaLida:
+    """Os lançamentos de uma fatura já fechada. Pelo Open Finance cada transação traz o id da fatura."""
+    com_fatura = [t for t in transacoes if (t.get("creditCardMetadata") or {}).get("billId")]
+    if com_fatura:
+        escolhidas = [t for t in com_fatura if t["creditCardMetadata"]["billId"] == fatura["id"]]
+    else:
+        # Sem o id (conectores diretos): pelo período entre o fechamento anterior e este.
+        fecha = date.fromisoformat((fatura.get("billClosingDate") or fatura["dueDate"])[:10])
+        anteriores = [b for b in conta_faturas if (b.get("dueDate") or "") < fatura["dueDate"]]
+        abre = (
+            date.fromisoformat((anteriores[0].get("billClosingDate") or anteriores[0]["dueDate"])[:10]) + timedelta(days=1)
+            if anteriores
+            else fecha - timedelta(days=31)
+        )
+        escolhidas = [t for t in transacoes if abre <= _data(t) <= fecha]
+    itens = [i for i in map(item_da_fatura, escolhidas) if i]
+    total = fatura.get("totalAmount")
+    if total is not None and escolhidas:
+        # Juros, IOF e saldo da fatura anterior entram no total do banco sem virar transação.
+        # A diferença entra como uma linha, para a fatura no app ser o que de fato se paga.
+        diferenca = centavos(total) - sum(i.valor for i in itens)
+        if diferenca:
+            fecha = date.fromisoformat((fatura.get("billClosingDate") or fatura["dueDate"])[:10])
+            itens.append(
+                Item(
+                    data=fecha,
+                    descricao="Juros, IOF e saldo anterior (diferença para o total do banco)" if diferenca > 0 else "Crédito da fatura (diferença para o total do banco)",
+                    valor=diferenca,
+                    tipo=Tipo.ENCARGO if diferenca > 0 else Tipo.CREDITO,
+                )
+            )
+    return FaturaLida(
+        banco=nome,
+        itens=sorted(itens, key=lambda i: i.data),
+        total=centavos(total) if total is not None else None,
+        vencimento=date.fromisoformat(fatura["dueDate"][:10]),
+        final=final,
+    )
+
+
+def _compra(t: dict) -> tuple:
+    """Identifica a compra parcelada em todas as parcelas: descrição sem o 3/10, total e data da compra."""
+    meta = t.get("creditCardMetadata") or {}
+    descricao = _PARCELA_NO_FIM.sub("", t.get("description") or t.get("descriptionRaw") or "")
+    return (normalizar(descricao), meta.get("totalInstallments"), (meta.get("purchaseDate") or "")[:10] or centavos(t.get("amount")))
+
+
+def _mesma_compra(a: dict, b: dict) -> bool:
+    """Duas parcelas da mesma compra, mesmo com a descrição ou os centavos um pouco diferentes."""
+    ma, mb = a["creditCardMetadata"], b["creditCardMetadata"]
+    # A mesma parcela duas vezes são duas compras iguais (duas unidades do mesmo produto, por exemplo).
+    if ma.get("installmentNumber") == mb.get("installmentNumber") or ma.get("totalInstallments") != mb.get("totalInstallments"):
+        return False
+    if _compra(a) == _compra(b):
+        return True
+    va, vb = abs(centavos(a.get("amount"))), abs(centavos(b.get("amount")))
+    if abs(va - vb) > max(100, max(va, vb) // 50):
+        return False
+    da, db = (normalizar(_PARCELA_NO_FIM.sub("", t.get("description") or t.get("descriptionRaw") or "")).replace(" ", "") for t in (a, b))
+    curta = min(len(da), len(db), 10)
+    return curta >= 4 and da[:curta] == db[:curta]
+
+
+def _proxima_de_cada_compra(parcelas: list[dict]) -> list[dict]:
+    """Só a menor parcela ainda sem fatura de cada compra: se a k já está na aberta, a k+1 é da próxima,
+    mesmo que o banco a date no dia do fechamento."""
+    escolhidas: list[dict] = []
+    for t in sorted(parcelas, key=lambda t: t["creditCardMetadata"]["installmentNumber"]):
+        if not any(_mesma_compra(t, e) for e in escolhidas):
+            escolhidas.append(t)
+    return escolhidas
+
+
+def _encargo_da_ultima(nome: str, final: str, fechadas: list[dict], transacoes: list[dict]) -> int:
+    """Juros, IOF e saldo anterior que entraram na última fatura fechada sem virar transação."""
+    com_data = [b for b in fechadas if b.get("dueDate")]
+    if not com_data:
+        return 0
+    ultima = max(com_data, key=lambda b: b["dueDate"])
+    lida = fatura_fechada(nome, final, fechadas, ultima, transacoes)
+    return sum(i.valor for i in lida.itens if i.tipo == Tipo.ENCARGO and i.descricao.startswith("Juros, IOF"))
+
+
+def fatura_aberta(
+    nome: str, final: str, ids_fechadas: set[str], desde: date, fecha: date, vence: date, transacoes: list[dict], fechadas: list[dict] | None = None
+) -> FaturaLida:
+    """O que vai entrar na fatura que ainda não fechou: compras novas e a próxima parcela de cada compra antiga.
+
+    A Pluggy lista as parcelas futuras ainda sem fatura, cada uma num dia projetado do mês dela, que não
+    bate com o ciclo do cartão. Por isso a parcela da fatura aberta é a menor de cada compra que ainda não
+    está numa fatura fechada; as seguintes viram previsão ao importar. Compras à vista: pela data, desde o
+    último fechamento informado pelo banco.
+    """
+    com_fatura = any((t.get("creditCardMetadata") or {}).get("billId") for t in transacoes)
+    # Estorno ou crédito ainda pendente: o banco não abateu da fatura, então ainda não entra.
+    soltas = [
+        t
+        for t in transacoes
+        if (t.get("creditCardMetadata") or {}).get("billId") not in ids_fechadas
+        and not (t.get("status") == "PENDING" and centavos(t.get("amount")) < 0)
+    ]
+    escolhidas, parcelas = [], []
+    for t in soltas:
+        meta = t.get("creditCardMetadata") or {}
+        atual, total = meta.get("installmentNumber"), meta.get("totalInstallments")
+        if com_fatura and atual and total and total > 1:
+            parcelas.append(t)
+        elif com_fatura or desde <= _data(t) <= fecha:
+            # Com o id da fatura no conector, o que não está numa fatura fechada é da aberta, seja qual
+            # for a data (compra lançada antes do início do ciclo no app, estorno pequeno).
+            escolhidas.append(t)
+    escolhidas += _proxima_de_cada_compra(parcelas)
+    itens = [i for i in map(item_da_fatura, escolhidas) if i]
+    encargo = _encargo_da_ultima(nome, final, fechadas or [], transacoes)
+    if encargo > 0:
+        # O banco só soma juros, IOF e saldo anterior ao fechar. Até lá, repete o da fatura passada como
+        # previsão; ao importar a fatura fechada, a linha dá lugar à diferença de verdade.
+        itens.append(Item(data=fecha, descricao="Previsto: juros, IOF e saldo anterior como na fatura passada", valor=encargo, tipo=Tipo.ENCARGO))
+    return FaturaLida(banco=nome, itens=sorted(itens, key=lambda i: i.data), total=None, vencimento=vence, final=final)
+
+
+def ultimo_fechamento(faturas: list[dict]) -> date | None:
+    datas = [date.fromisoformat((b.get("billClosingDate") or b.get("dueDate"))[:10]) for b in faturas if b.get("billClosingDate") or b.get("dueDate")]
+    return max(datas) if datas else None
+
+
+_APLICACAO = ("aplicacao automatica", "resgate automatico", "rende facil", "aplic aut", "resg aut")
+
+
+def movimento(t: dict) -> Movimento:
+    valor = abs(centavos(t.get("amount")))
+    if t.get("type") == "DEBIT":
+        valor = -valor
+    origem = (t.get("description") or t.get("descriptionRaw") or "").strip()
+    pagamento = t.get("paymentData") or {}
+    # Pix e TED trazem quem pagou ou recebeu; é o nome que interessa na lista.
+    outro = (pagamento.get("receiver") if valor < 0 else pagamento.get("payer")) or {}
+    nome = (outro.get("name") or "").strip()
+    texto = normalizar(origem)
+    return Movimento(
+        data=_data(t),
+        descricao=(nome or origem or "Sem descrição")[:120],
+        origem=origem[:120] if nome else (pagamento.get("paymentMethod") or ""),
+        valor=valor,
+        detalhes=t.get("category") or "",
+        # O id da transação não muda de pendente para efetivada: importar de novo não duplica.
+        documento=t.get("providerId") or t.get("id") or "",
+        aplicacao=any(p in texto for p in _APLICACAO),
+    )
+
+
+def extrato(nome: str, transacoes: list[dict]) -> ExtratoLido:
+    # Pendentes (agendamentos, bloqueios) só entram depois de efetivadas.
+    efetivadas = [t for t in transacoes if t.get("status", "POSTED") == "POSTED" and centavos(t.get("amount"))]
+    return ExtratoLido(banco=nome, itens=sorted((movimento(t) for t in efetivadas), key=lambda m: m.data))

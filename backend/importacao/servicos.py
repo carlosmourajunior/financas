@@ -186,15 +186,20 @@ def confirmar(cartao: Cartao, fecha: date, itens: list[dict]) -> dict:
     """Grava as linhas escolhidas no ciclo que fecha em `fecha`.
 
     O que foi importado antes para este ciclo é apagado e substituído; lançamentos feitos à mão ficam.
+    Na fatura que ainda não fechou, as parcelas previstas de compras antigas também ficam.
     Uma parcela k de n cria também as parcelas seguintes. A compra é reconhecida pela chave em qualquer
     fatura, então importar o mês seguinte (ou um anterior) não duplica parcelas.
     """
     ciclo = fatura_que_fecha_em(cartao, fecha)
-    substituidos, _ = Lancamento.objects.filter(
-        cartao=cartao, importado=True, data__gte=ciclo.abre, data__lte=ciclo.fecha
-    ).delete()
-
     hoje = date.today()
+    anteriores = Lancamento.objects.filter(cartao=cartao, importado=True, data__gte=ciclo.abre, data__lte=ciclo.fecha)
+    if ciclo.fecha >= hoje:
+        # Fatura ainda aberta: o banco só mostra o que já entrou, e as parcelas de compras antigas
+        # costumam aparecer só no fechamento. A previsão delas (criada pela fatura anterior) fica;
+        # se a parcela vier na lista, a mesma linha é atualizada pela chave.
+        anteriores = anteriores.filter(chave="")
+    substituidos, _ = anteriores.delete()
+
     criados = 0
     # Linhas iguais da mesma compra na mesma fatura: a menor fica com ordem 1, e assim por diante.
     ordens: Counter = Counter()

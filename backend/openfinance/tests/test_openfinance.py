@@ -358,9 +358,9 @@ class ImportarRecentesTests(APITestCase):
         r = self.importar()
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(r.json()["pulados"], [])
-        # Fatura de outubro: 2 únicas + parcela 3/10 e as 7 previstas. A de novembro (padaria) vem do
-        # banco e substitui a previsão da 4/10 naquele ciclo, que o banco real traria junto.
-        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 10)
+        # Fatura de outubro: 2 únicas + parcela 3/10 e as 7 previstas; a padaria, ainda sem fatura no
+        # banco, vai para a aberta.
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 11)
         self.assertTrue(Lancamento.objects.filter(cartao=self.cartao, descricao="Padaria do Zé").exists())
         em_conta = Lancamento.objects.filter(conta=self.conta).order_by("data")
         self.assertEqual([(l.descricao, l.natureza) for l in em_conta], [("Maria Exemplo", "despesa"), ("Empresa X", "receita")])
@@ -375,7 +375,7 @@ class ImportarRecentesTests(APITestCase):
         # De novo: nada duplica.
         self.importar()
         self.assertEqual(Lancamento.objects.filter(conta=self.conta).count(), 2)
-        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 10)
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 11)
         saldo = self.conta.saldo_inicial
         self.conta.refresh_from_db()
         self.assertEqual(self.conta.saldo_inicial, saldo)
@@ -415,3 +415,18 @@ class CartaoDesativadoTests(APITestCase):
         # Reativar é o mesmo PATCH.
         self.client.patch(f"/api/cartoes/{ouro.id}/", {"ativo": True}, format="json")
         self.assertTrue(self.client.get("/api/openfinance/").json()["contas"][3]["conferir_datas"])
+
+
+class ParcelasNaFaturaAbertaTests(APITestCase):
+    def test_a_proxima_parcela_de_cada_compra_entra_mesmo_com_data_fora_do_ciclo(self):
+        meta = lambda k, n, fat=None: {"installmentNumber": k, "totalInstallments": n, "purchaseDate": "2026-06-02", **({"billId": fat} if fat else {})}
+        transacoes = [
+            tx("a3", "2026-10-02", "TV 3/10", 100, creditCardMetadata=meta(3, 10, "fat-out")),
+            # Sem fatura: a 4/10 (data projetada em dezembro, fora do ciclo aberto) e as seguintes.
+            tx("a4", "2026-12-02", "TV 4/10", 100, status="PENDING", creditCardMetadata=meta(4, 10)),
+            tx("a5", "2027-01-02", "TV 5/10", 100, status="PENDING", creditCardMetadata=meta(5, 10)),
+            tx("n1", "2026-11-20", "Mercado", 50, creditCardMetadata={}),
+            tx("n0", "2026-10-05", "Já na fatura", 10, creditCardMetadata={"billId": "fat-out"}),
+        ]
+        lida = conversao.fatura_aberta("Nubank", "", {"fat-out"}, date(2026, 10, 9), date(2026, 12, 8), date(2026, 12, 15), transacoes)
+        self.assertEqual(sorted((i.descricao, i.parcela_atual) for i in lida.itens), [("Mercado", None), ("TV", 4)])

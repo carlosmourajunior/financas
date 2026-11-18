@@ -338,8 +338,8 @@ def _instancias(item: dict, dono) -> dict:
 def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
     """Importa de uma vez, sem a revisão linha a linha, o que veio do banco nos últimos `dias`.
 
-    Usa a mesma prévia da importação manual: o que ela marcaria como repetido ou já importado
-    fica de fora. Cartões: as faturas que venceram no período e a aberta. Contas: o extrato do
+    Usa a mesma prévia da importação manual: o que ela marcaria como repetido de um lançamento feito
+    à mão fica de fora. O que veio do banco antes, no período, é refeito. Cartões: as faturas que venceram no período e a aberta. Contas: o extrato do
     período, com o saldo inicial recalculado para o saldo de hoje continuar igual ao do banco.
     """
     hoje = date.today()
@@ -366,15 +366,21 @@ def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
         # compra); as parcelas seguintes viram previsão nas próximas faturas.
         ids = {b["id"] for b in fechadas}
         lidas.append(conversao.fatura_aberta(cartao.nome, final, ids, inicio_aberta, aberta.fecha, aberta.vence, transacoes, fechadas))
-        for lida in lidas:
-            if not lida.itens:
-                continue
-            p = previa(cartao, lida)
-            itens = [i for i in p["itens"] if i["importar"]]
-            if itens:
-                r = confirmar(cartao, p["ciclo"]["fecha"], itens)
-                feito["lancamentos_cartao"] += r["criados"]
-                feito["faturas"] += 1
+        # Prévias antes de apagar: a categoria sugerida vem do que já foi categorizado.
+        previas = sorted((previa(cartao, lida) for lida in lidas if lida.itens), key=lambda p: p["ciclo"]["fecha"])
+        if not previas:
+            continue
+        with transaction.atomic():
+            # O banco é a fonte: o que veio dele antes, deste período em diante, é refeito do zero. Assim
+            # uma compra que caiu na fatura errada numa versão anterior (ou com outro dia de fechamento)
+            # volta para o lugar certo. Lançamentos feitos à mão ficam.
+            Lancamento.objects.filter(cartao=cartao, importado=True, data__gte=previas[0]["ciclo"]["abre"]).delete()
+            for p in previas:
+                itens = [i for i in p["itens"] if i["importar"]]
+                if itens:
+                    r = confirmar(cartao, p["ciclo"]["fecha"], itens)
+                    feito["lancamentos_cartao"] += r["criados"]
+                    feito["faturas"] += 1
 
     cartoes_ligados = list(Vinculo.objects.filter(dono=dono, cartao__ativo=True).select_related("cartao"))
     filtro = {} if poupancas else {"conta__tipo__in": [Conta.Tipo.CORRENTE, Conta.Tipo.DINHEIRO]}

@@ -380,6 +380,16 @@ class ImportarRecentesTests(APITestCase):
         self.conta.refresh_from_db()
         self.assertEqual(self.conta.saldo_inicial, saldo)
 
+    def test_importar_de_novo_corrige_o_que_estava_no_lugar_errado(self, _):
+        self.importar()
+        # Uma versão anterior deixou uma parcela prevista a mais na fatura aberta; a feita à mão fica.
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Parcela fantasma", valor=10_000, data=date(2026, 11, 7),
+                                  natureza="despesa", importado=True, chave="x", parcela_atual=2, parcela_total=3, tipo="parcelada")
+        Lancamento.objects.create(dono=self.usuario, cartao=self.cartao, descricao="Feita à mão", valor=5_000, data=date(2026, 11, 7), natureza="despesa")
+        self.importar()
+        self.assertFalse(Lancamento.objects.filter(descricao="Parcela fantasma").exists())
+        self.assertEqual(Lancamento.objects.filter(cartao=self.cartao).count(), 12)
+
     def test_cartao_sem_datas_fica_de_fora(self, _):
         Vinculo.objects.filter(cartao=self.cartao).update(conferir_datas=True)
         r = self.importar().json()

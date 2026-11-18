@@ -46,9 +46,11 @@ class Cartao(DoUsuario):
     limite = models.BigIntegerField(validators=[MinValueValidator(0)])
     dia_fechamento = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(28)])
     dia_vencimento = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(28)])
+    # Desativado: some de Cartões, das faturas e das previsões, mas o histórico fica.
+    ativo = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ["nome"]
+        ordering = ["-ativo", "nome"]
         verbose_name_plural = "cartões"
 
     def __str__(self):

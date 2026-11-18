@@ -88,7 +88,7 @@ def previa_extrato(conta: Conta, lida: ExtratoLido) -> dict:
         historico[(normalizar(desc), natureza)] = cat
     recorrentes = {(normalizar(r.descricao), r.natureza) for r in Recorrencia.objects.filter(dono=dono, ativa=True, cartao__isnull=True)}
 
-    cartoes = list(Cartao.objects.filter(dono=dono))
+    cartoes = list(Cartao.objects.filter(dono=dono, ativo=True))
     emprestimos = list(Emprestimo.objects.filter(dono=dono))
     ja_importadas = set(Lancamento.objects.filter(dono=dono, chave__startswith="extrato|").values_list("chave", flat=True))
 

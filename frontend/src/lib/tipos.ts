@@ -23,6 +23,7 @@ export interface Cartao {
   limite: number
   dia_fechamento: number
   dia_vencimento: number
+  ativo: boolean
 }
 
 export interface Categoria {

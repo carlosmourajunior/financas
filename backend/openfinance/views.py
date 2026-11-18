@@ -65,7 +65,7 @@ class EstadoView(APIView):
     def get(self, request):
         if not pluggy.liberado_para(request.user):
             return Response({"ativo": False, "contas": []})
-        vinculos = {v.pluggy_conta: v for v in Vinculo.objects.filter(dono=request.user)}
+        vinculos = {v.pluggy_conta: v for v in Vinculo.objects.filter(dono=request.user).select_related("cartao")}
         contas = _chamar(pluggy.contas)
         nomes = pluggy.nomes(contas)
         return Response(
@@ -81,7 +81,9 @@ class EstadoView(APIView):
                         "saldo": c.saldo,
                         "conta": getattr(vinculos.get(c.id), "conta_id", None),
                         "cartao": getattr(vinculos.get(c.id), "cartao_id", None),
-                        "conferir_datas": getattr(vinculos.get(c.id), "conferir_datas", False),
+                        "conferir_datas": bool(
+                            (v := vinculos.get(c.id)) and v.conferir_datas and (v.cartao_id is None or v.cartao.ativo)
+                        ),
                     }
                     for c in contas
                 ],
@@ -222,6 +224,9 @@ def trazer_contas(dono) -> dict:
         nome = nomes[c.id]
         if c.id in ligadas:
             v = ligadas[c.id]
+            if v.cartao and not v.cartao.ativo:
+                # Desativado pelo usuário: não volta, não renomeia, não pede datas.
+                continue
             alvo = v.conta or v.cartao
             dados = {v.nome_dado} if v.nome_dado else {c.nome.strip(), _nome_da_versao_anterior(c)}
             if alvo.nome in dados and alvo.nome != nome:
@@ -323,7 +328,7 @@ def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
     feito = {"lancamentos_cartao": 0, "faturas": 0, "movimentos": 0, "pulados": []}
     por_id = {c.id: c for c in _chamar(pluggy.contas)}
 
-    for v in Vinculo.objects.filter(dono=dono, cartao__isnull=False).select_related("cartao"):
+    for v in Vinculo.objects.filter(dono=dono, cartao__ativo=True).select_related("cartao"):
         c, cartao = por_id.get(v.pluggy_conta), v.cartao
         if not c:
             continue
@@ -355,7 +360,7 @@ def importar_recentes(dono, dias: int, poupancas: bool) -> dict:
                 feito["lancamentos_cartao"] += r["criados"]
                 feito["faturas"] += 1
 
-    cartoes_ligados = list(Vinculo.objects.filter(dono=dono, cartao__isnull=False).select_related("cartao"))
+    cartoes_ligados = list(Vinculo.objects.filter(dono=dono, cartao__ativo=True).select_related("cartao"))
     filtro = {} if poupancas else {"conta__tipo__in": [Conta.Tipo.CORRENTE, Conta.Tipo.DINHEIRO]}
     for v in Vinculo.objects.filter(dono=dono, conta__isnull=False, **filtro).select_related("conta"):
         c, conta = por_id.get(v.pluggy_conta), v.conta

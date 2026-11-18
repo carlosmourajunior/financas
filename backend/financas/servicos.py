@@ -273,7 +273,7 @@ def faturas_do_mes(dono, mes: date, hoje: date) -> list[dict]:
     """Uma linha por fatura que vence no mês, para a lista de lançamentos."""
     inicio, fim = inicio_do_mes(mes), fim_do_mes(mes)
     linhas = []
-    for c in Cartao.objects.filter(dono=dono):
+    for c in Cartao.objects.filter(dono=dono, ativo=True):
         pagos = pagamentos_por_fecha(c)
         for f in faturas_vencendo(c, inicio, fim):
             if f.total:
@@ -365,7 +365,7 @@ def resumo(dono, hoje: date) -> dict:
     # Saldo em conta: o que já aconteceu nas contas até hoje.
     # Saldo em conta: o que já foi pago ou recebido nas contas, mais as faturas pagas.
     em_conta = lanc.filter(conta__isnull=False, pago=True)
-    cartoes = list(Cartao.objects.filter(dono=dono))
+    cartoes = list(Cartao.objects.filter(dono=dono, ativo=True))
     saldo = (
         (Conta.objects.filter(dono=dono).aggregate(s=Sum("saldo_inicial"))["s"] or 0)
         + _soma(em_conta.filter(natureza=Natureza.RECEITA))

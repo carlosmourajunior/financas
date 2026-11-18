@@ -453,3 +453,23 @@ class RepetirLancamentoTests(APITestCase):
         l2 = self.lanc()
         r = self.client.post(f"/api/lancamentos/{l2.id}/repetir/", {"tipo": "parcelada", "parcela_atual": 4, "parcela_total": 3}, format="json")
         self.assertEqual(r.status_code, 400)
+
+
+class CartaoDesativadoFaturasTests(APITestCase):
+    def test_fatura_de_cartao_desativado_some_de_lancamentos_e_do_resumo(self):
+        from django.contrib.auth import get_user_model
+
+        u = get_user_model().objects.create_user(email="d@exemplo.com", password="senha-forte-123")
+        self.client.force_authenticate(u)
+        cartao = Cartao.objects.create(dono=u, nome="Velho", limite=100_000, dia_fechamento=3, dia_vencimento=10)
+        hoje = date.today()
+        Lancamento.objects.create(dono=u, descricao="Compra", valor=5_000, natureza="despesa", data=hoje, cartao=cartao)
+        mes = f"{hoje:%Y-%m}"
+        proximo = f"{somar_meses(hoje, 1):%Y-%m}"
+        antes = len(self.client.get(f"/api/faturas/?mes={mes}").json()) + len(self.client.get(f"/api/faturas/?mes={proximo}").json())
+        self.assertEqual(antes, 1)
+        cartao.ativo = False
+        cartao.save()
+        depois = len(self.client.get(f"/api/faturas/?mes={mes}").json()) + len(self.client.get(f"/api/faturas/?mes={proximo}").json())
+        self.assertEqual(depois, 0)
+        self.assertEqual(self.client.get("/api/resumo/").status_code, 200)
